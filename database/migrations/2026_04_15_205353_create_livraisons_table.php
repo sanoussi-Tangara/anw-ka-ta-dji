@@ -18,9 +18,9 @@ return new class extends Migration
             $table->text('signature_chauffeur')->nullable();
             $table->string('photo_compteur', 255)->nullable();
             $table->enum('statut', ['en_attente', 'validee', 'ecart'])->default('en_attente');
-            $table->foreignId('id_mission')->constrained('missions', 'id_mission');
             $table->foreignId('id_station')->constrained('stations', 'id_station');
             $table->foreignId('id_gerant')->constrained('gerants', 'id_gerant');
+            $table->foreignId('id_pompiste')->nullable()->constrained('pompistes', 'id_pompiste');
             $table->timestamps();
         });
     }
