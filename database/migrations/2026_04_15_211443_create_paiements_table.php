@@ -15,7 +15,6 @@ return new class extends Migration
             $table->datetime('date_paiement');
             $table->enum('statut', ['en_attente', 'paye', 'echoue'])->default('en_attente');
             $table->string('reference_transaction', 100)->nullable();
-            $table->foreignId('id_reservation')->constrained('reservations', 'id_reservation');
             $table->timestamps();
         });
     }
