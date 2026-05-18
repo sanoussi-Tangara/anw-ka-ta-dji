@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { Mail, Lock, Loader2, Eye, EyeOff, ArrowLeft } from "lucide-react";
+// ✅ AJOUT 1 : Importer la fonction login depuis ton api
+import { login } from "../../lib/api";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -11,23 +13,28 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
 
+  // ✅ AJOUT 2 : Remplacer la fonction handleSubmit
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
     setError("");
     
-    // Simulation de connexion
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    
-    if (email && password) {
-      localStorage.setItem("isLoggedIn", "true");
-      localStorage.setItem("user", JSON.stringify({ email }));
-      window.location.href = "/";
-    } else {
-      setError("Email ou mot de passe incorrect");
+    try {
+      // Appel réel à l'API Laravel
+      const response = await login(email, password);
+      
+      // Redirection selon le rôle
+      if (response.redirect_to) {
+        window.location.href = response.redirect_to;
+      } else {
+        window.location.href = "/dashboard";
+      }
+      
+    } catch (err) {
+      setError(err.message || "Email ou mot de passe incorrect");
+    } finally {
+      setIsLoading(false);
     }
-    
-    setIsLoading(false);
   };
 
   // Fonction pour retourner à l'accueil

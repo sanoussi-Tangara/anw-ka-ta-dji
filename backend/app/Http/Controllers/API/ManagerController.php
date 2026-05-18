@@ -19,11 +19,11 @@ use Carbon\Carbon;
 
 class ManagerController extends Controller
 {
-    public function __construct()
-    {
-        $this->middleware('auth:sanctum');
-        $this->middleware('role:manager');
-    }
+    // public function __construct()
+    // {
+    //     $this->middleware('auth:sanctum');
+    //     $this->middleware('role:manager');
+    // }
 
     // ==============================================
     // 🔹 GESTION DES FOURNISSEURS
@@ -49,8 +49,7 @@ class ManagerController extends Controller
                 'email' => $request->email,
                 'password' => Hash::make($request->password),
                 'telephone' => $request->telephone,
-                'role' => 'fournisseur',
-                'statut' => true
+                'role' => 'fournisseur'
             ]);
 
             $fournisseur = Fournisseur::create([
@@ -178,8 +177,7 @@ class ManagerController extends Controller
                 'email' => $request->email,
                 'password' => Hash::make($request->password),
                 'telephone' => $request->telephone,
-                'role' => 'icr',
-                'statut' => true
+                'role' => 'icr'
             ]);
 
             $icr = Icr::create([
@@ -304,8 +302,7 @@ class ManagerController extends Controller
                 'email' => $request->email,
                 'password' => Hash::make($request->password),
                 'telephone' => $request->telephone,
-                'role' => 'responsable_depot',
-                'statut' => true
+                'role' => 'responsable_depot'
             ]);
 
             $responsable = ResponsableDepot::create([
