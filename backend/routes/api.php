@@ -122,3 +122,25 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('statistiques/{id_station}', [StationController::class, 'statistiques']);
     });
 });
+
+use App\Http\Controllers\API\ResponsableDepotController;
+
+// Routes pour Responsable de Dépôt
+Route::prefix('responsable-depot')->middleware(['auth:sanctum', 'role:responsable_depot'])->group(function () {
+    // Profil
+    Route::get('/profil/{id_responsable}', [ResponsableDepotController::class, 'profil']);
+    Route::put('/profil/{id_responsable}', [ResponsableDepotController::class, 'updateProfil']);
+    
+    // Bons
+    Route::get('/bons-recus/{id_responsable}', [ResponsableDepotController::class, 'bonsRecus']);
+    Route::get('/bon/{id_bon}', [ResponsableDepotController::class, 'detailBon']);
+    
+    // Chargement
+    Route::post('/verifier-code', [ResponsableDepotController::class, 'verifierCode']);
+    Route::post('/autoriser-chargement', [ResponsableDepotController::class, 'autoriserChargement']);
+    Route::post('/terminer-chargement', [ResponsableDepotController::class, 'terminerChargement']);
+    
+    // Stocks
+    Route::get('/stock/{id_responsable}', [ResponsableDepotController::class, 'voirStock']);
+    Route::get('/historique/{id_responsable}', [ResponsableDepotController::class, 'historiqueSorties']);
+});

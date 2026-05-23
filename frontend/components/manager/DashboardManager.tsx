@@ -19,31 +19,89 @@ import {
   activerResponsableDepot,
 } from "../../lib/api";
 
+/* ================= TYPES ================= */
+
+type User = {
+  nom?: string;
+  prenom?: string;
+  email?: string;
+  statut?: boolean;
+};
+
+type Fournisseur = {
+  id_fournisseur: number;
+  nom_societe: string;
+  user?: User;
+};
+
+type Icr = {
+  id_icr: number;
+  matricule: string;
+  zone?: string;
+  user?: User;
+};
+
+type Responsable = {
+  id_responsable: number;
+  user?: User;
+};
+
+type Station = {
+  id_station?: number;
+};
+
+type Prix = {
+  essence: number;
+  gasoil: number;
+};
+
 export default function DashboardManager() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  const [fournisseurs, setFournisseurs] = useState([]);
-  const [icrs, setIcrs] = useState([]);
-  const [responsables, setResponsables] = useState([]);
-  const [stations, setStations] = useState([]);
-  const [prix, setPrix] = useState({ essence: 750, gasoil: 700 });
+  // ✅ CORRECTION NEVER[]
+  const [fournisseurs, setFournisseurs] = useState<Fournisseur[]>([]);
+  const [icrs, setIcrs] = useState<Icr[]>([]);
+  const [responsables, setResponsables] = useState<Responsable[]>([]);
+  const [stations, setStations] = useState<Station[]>([]);
+  const [prix, setPrix] = useState<Prix>({
+    essence: 750,
+    gasoil: 700,
+  });
 
   const [newFournisseur, setNewFournisseur] = useState({
-    nom_societe: "", adresse: "", nif: "", email: "", password: "", telephone: ""
+    nom_societe: "",
+    adresse: "",
+    nif: "",
+    email: "",
+    password: "",
+    telephone: "",
   });
 
   const [newIcr, setNewIcr] = useState({
-    nom: "", prenom: "", email: "", password: "", telephone: "", matricule: "", zone: ""
+    nom: "",
+    prenom: "",
+    email: "",
+    password: "",
+    telephone: "",
+    matricule: "",
+    zone: "",
   });
 
   const [newResponsable, setNewResponsable] = useState({
-    nom: "", prenom: "", email: "", password: "", telephone: ""
+    nom: "",
+    prenom: "",
+    email: "",
+    password: "",
+    telephone: "",
   });
 
-  const [prixForm, setPrixForm] = useState({ essence: 750, gasoil: 700 });
+  const [prixForm, setPrixForm] = useState<Prix>({
+    essence: 750,
+    gasoil: 700,
+  });
 
   useEffect(() => {
     fetchData();
@@ -51,22 +109,36 @@ export default function DashboardManager() {
 
   const fetchData = async () => {
     setLoading(true);
+
     try {
-      const [fournisseursRes, icrsRes, responsablesRes, stationsRes, prixRes] = await Promise.all([
+      const [
+        fournisseursRes,
+        icrsRes,
+        responsablesRes,
+        stationsRes,
+        prixRes,
+      ] = await Promise.all([
         getFournisseurs(),
         getIcrs(),
         getResponsablesDepot(),
         getStations(),
-        getPrix()
+        getPrix(),
       ]);
 
       setFournisseurs(fournisseursRes.fournisseurs || []);
       setIcrs(icrsRes.icrs || []);
       setResponsables(responsablesRes.responsables || []);
       setStations(stationsRes.stations || []);
-      setPrix({ essence: prixRes.essence || 750, gasoil: prixRes.gasoil || 700 });
-      setPrixForm({ essence: prixRes.essence || 750, gasoil: prixRes.gasoil || 700 });
 
+      setPrix({
+        essence: prixRes.essence || 750,
+        gasoil: prixRes.gasoil || 700,
+      });
+
+      setPrixForm({
+        essence: prixRes.essence || 750,
+        gasoil: prixRes.gasoil || 700,
+      });
     } catch {
       setError("Erreur de chargement des données");
     } finally {
@@ -74,77 +146,141 @@ export default function DashboardManager() {
     }
   };
 
-  const showMessage = (msg, isError = false) => {
+  // ✅ CORRECTION msg:any
+  const showMessage = (msg: string, isError = false) => {
     setMessage(msg);
     setError(isError ? msg : "");
-    setTimeout(() => { setMessage(""); setError(""); }, 3000);
+
+    setTimeout(() => {
+      setMessage("");
+      setError("");
+    }, 3000);
   };
 
   // Création Fournisseur
-  const handleCreateFournisseur = async (e) => {
+  const handleCreateFournisseur = async (
+    e: React.FormEvent<HTMLFormElement>
+  ) => {
     e.preventDefault();
     setLoading(true);
+
     try {
       await createFournisseur(newFournisseur);
+
       showMessage("Fournisseur créé avec succès");
-      setNewFournisseur({ nom_societe: "", adresse: "", nif: "", email: "", password: "", telephone: "" });
+
+      setNewFournisseur({
+        nom_societe: "",
+        adresse: "",
+        nif: "",
+        email: "",
+        password: "",
+        telephone: "",
+      });
+
       fetchData();
-    } catch (err) {
-      showMessage(err.message, true);
+    } catch (err: unknown) {
+      // ✅ CORRECTION unknown
+      if (err instanceof Error) {
+        showMessage(err.message, true);
+      }
     } finally {
       setLoading(false);
     }
   };
 
   // Création ICR
-  const handleCreateIcr = async (e) => {
+  const handleCreateIcr = async (
+    e: React.FormEvent<HTMLFormElement>
+  ) => {
     e.preventDefault();
     setLoading(true);
+
     try {
       await createIcr(newIcr);
+
       showMessage("ICR créé avec succès");
-      setNewIcr({ nom: "", prenom: "", email: "", password: "", telephone: "", matricule: "", zone: "" });
+
+      setNewIcr({
+        nom: "",
+        prenom: "",
+        email: "",
+        password: "",
+        telephone: "",
+        matricule: "",
+        zone: "",
+      });
+
       fetchData();
-    } catch (err) {
-      showMessage(err.message, true);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        showMessage(err.message, true);
+      }
     } finally {
       setLoading(false);
     }
   };
 
   // Création Responsable Dépôt
-  const handleCreateResponsable = async (e) => {
+  const handleCreateResponsable = async (
+    e: React.FormEvent<HTMLFormElement>
+  ) => {
     e.preventDefault();
     setLoading(true);
+
     try {
       await createResponsableDepot(newResponsable);
+
       showMessage("Responsable de dépôt créé avec succès");
-      setNewResponsable({ nom: "", prenom: "", email: "", password: "", telephone: "" });
+
+      setNewResponsable({
+        nom: "",
+        prenom: "",
+        email: "",
+        password: "",
+        telephone: "",
+      });
+
       fetchData();
-    } catch (err) {
-      showMessage(err.message, true);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        showMessage(err.message, true);
+      }
     } finally {
       setLoading(false);
     }
   };
 
   // Fixer les prix
-  const handleFixerPrix = async (e) => {
+  const handleFixerPrix = async (
+    e: React.FormEvent<HTMLFormElement>
+  ) => {
     e.preventDefault();
     setLoading(true);
+
     try {
       await fixerPrix(prixForm.essence, prixForm.gasoil);
+
       showMessage("Prix mis à jour avec succès");
-      setPrix({ essence: prixForm.essence, gasoil: prixForm.gasoil });
-    } catch (err) {
-      showMessage(err.message, true);
+
+      setPrix({
+        essence: prixForm.essence,
+        gasoil: prixForm.gasoil,
+      });
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        showMessage(err.message, true);
+      }
     } finally {
       setLoading(false);
     }
   };
 
   // Désactiver/Activer Fournisseur
-  const toggleFournisseur = async (id, actif) => {
+  const toggleFournisseur = async (
+    id: number,
+    actif: boolean
+  ) => {
     try {
       if (actif) {
         await desactiverFournisseur(id);
@@ -153,14 +289,20 @@ export default function DashboardManager() {
         await activerFournisseur(id);
         showMessage("Fournisseur activé");
       }
+
       fetchData();
-    } catch (err) {
-      showMessage(err.message, true);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        showMessage(err.message, true);
+      }
     }
   };
 
   // Désactiver/Activer ICR
-  const toggleIcr = async (id, actif) => {
+  const toggleIcr = async (
+    id: number,
+    actif: boolean
+  ) => {
     try {
       if (actif) {
         await desactiverIcr(id);
@@ -169,14 +311,20 @@ export default function DashboardManager() {
         await activerIcr(id);
         showMessage("ICR activé");
       }
+
       fetchData();
-    } catch (err) {
-      showMessage(err.message, true);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        showMessage(err.message, true);
+      }
     }
   };
 
   // Désactiver/Activer Responsable
-  const toggleResponsable = async (id, actif) => {
+  const toggleResponsable = async (
+    id: number,
+    actif: boolean
+  ) => {
     try {
       if (actif) {
         await desactiverResponsableDepot(id);
@@ -185,9 +333,12 @@ export default function DashboardManager() {
         await activerResponsableDepot(id);
         showMessage("Responsable activé");
       }
+
       fetchData();
-    } catch (err) {
-      showMessage(err.message, true);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        showMessage(err.message, true);
+      }
     }
   };
 
@@ -206,7 +357,7 @@ export default function DashboardManager() {
         </div>
       </div>
 
-      {/* ALERTS */}
+     {/* ALERTS */}
       {message && (
         <div className="max-w-7xl mx-auto px-6 mt-4">
           <div className="bg-green-500/10 border border-green-500/30 text-green-300 px-4 py-3 rounded-xl backdrop-blur">
@@ -300,7 +451,11 @@ export default function DashboardManager() {
                       <div className="font-semibold">{f.nom_societe}</div>
                       <div className="text-sm text-gray-400">{f.user?.email}</div>
                     </div>
-                    <button onClick={() => toggleFournisseur(f.id_fournisseur, f.user?.statut)} className={`px-3 py-1 rounded text-sm ${f.user?.statut ? 'bg-red-500/80' : 'bg-green-500/80'} text-white`}>
+                    <button onClick={() =>
+                      toggleFournisseur(
+                      f.id_fournisseur,
+                      f.user?.statut ?? false  )} >
+
                       {f.user?.statut ? "Désactiver" : "Activer"}
                     </button>
                   </div>
@@ -337,7 +492,7 @@ export default function DashboardManager() {
                     <div className="font-semibold">{i.user?.nom} {i.user?.prenom}</div>
                     <div className="text-sm text-gray-400">Matricule: {i.matricule} | Zone: {i.zone || "-"}</div>
                     <div className="text-sm text-gray-400">{i.user?.email}</div>
-                    <button onClick={() => toggleIcr(i.id_icr, i.user?.statut)} className={`mt-2 px-3 py-1 rounded text-sm ${i.user?.statut ? 'bg-red-500/80' : 'bg-green-500/80'} text-white`}>
+                    <button onClick={() => toggleIcr(i.id_icr, i.user?.statut ?? false)}className={`mt-2 px-3 py-1 rounded text-sm ${i.user?.statut ? 'bg-red-500/80' : 'bg-green-500/80'} text-white`}>
                       {i.user?.statut ? "Désactiver" : "Activer"}
                     </button>
                   </div>
@@ -373,7 +528,7 @@ export default function DashboardManager() {
                       <div className="font-semibold">{r.user?.nom} {r.user?.prenom}</div>
                       <div className="text-sm text-gray-400">{r.user?.email}</div>
                     </div>
-                    <button onClick={() => toggleResponsable(r.id_responsable, r.user?.statut)} className={`px-3 py-1 rounded text-sm ${r.user?.statut ? 'bg-red-500/80' : 'bg-green-500/80'} text-white`}>
+                    <button onClick={() => toggleResponsable(r.id_responsable, r.user?.statut ?? false)}className={`px-3 py-1 rounded text-sm ${r.user?.statut ? 'bg-red-500/80' : 'bg-green-500/80'} text-white`}>
                       {r.user?.statut ? "Désactiver" : "Activer"}
                     </button>
                   </div>
@@ -409,6 +564,7 @@ export default function DashboardManager() {
         )}
 
       </div>
+      
     </div>
   );
 }

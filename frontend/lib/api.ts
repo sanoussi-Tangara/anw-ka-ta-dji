@@ -1,5 +1,4 @@
-// lib/api.ts
-
+// frontend/lib/api.ts
 const API_URL = "http://127.0.0.1:8000/api";
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -26,7 +25,8 @@ export async function apiFetch(
   if (requiresAuth) {
     const token = localStorage.getItem('token');
     if (token) {
-      requestHeaders['Authorization'] = `Bearer ${token}`;
+      (requestHeaders as any)['Authorization'] = `Bearer ${token}`;
+
     }
   }
 
@@ -46,8 +46,7 @@ export async function apiFetch(
       if (response.status === 401) {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
-    
-        throw new Error('mot de passe ou email incorrect, veuillez vous reconnecter');
+        throw new Error('Session expirée, veuillez vous reconnecter');
       }
 
       let errorMessage = `Erreur ${response.status}`;
@@ -105,16 +104,6 @@ export async function login(email: string, password: string): Promise<any> {
   return response;
 }
 
-export async function registerConsommateur(userData: {
-  nom: string;
-  prenom: string;
-  email: string;
-  password: string;
-  telephone: string;
-}): Promise<any> {
-  return apiPost('/register', userData, false);
-}
-
 export async function logout(): Promise<void> {
   try {
     await apiPost('/logout', {}, true);
@@ -141,7 +130,7 @@ export async function createFournisseur(data: {
   password: string;
   telephone: string;
 }): Promise<any> {
-  return apiPost('/manager/fournisseur/creer', data, true);
+  return apiPost('/manager/fournisseurs', data, true);
 }
 
 export async function updateFournisseur(id: number, data: {
@@ -150,7 +139,7 @@ export async function updateFournisseur(id: number, data: {
   nif?: string;
   telephone?: string;
 }): Promise<any> {
-  return apiPut(`/manager/fournisseur/modifier/${id}`, data, true);
+  return apiPut(`/manager/fournisseurs/${id}`, data, true);
 }
 
 export async function getFournisseurs(): Promise<any> {
@@ -158,11 +147,11 @@ export async function getFournisseurs(): Promise<any> {
 }
 
 export async function desactiverFournisseur(id: number): Promise<any> {
-  return apiPut(`/manager/fournisseur/desactiver/${id}`, {}, true);
+  return apiDelete(`/manager/fournisseurs/${id}`, true);
 }
 
 export async function activerFournisseur(id: number): Promise<any> {
-  return apiPut(`/manager/fournisseur/activer/${id}`, {}, true);
+  return apiPut(`/manager/fournisseurs/${id}/activer`, {}, true);
 }
 
 // ========== GESTION DES ICR (PAR MANAGER) ==========
@@ -176,7 +165,7 @@ export async function createIcr(data: {
   matricule: string;
   zone: string;
 }): Promise<any> {
-  return apiPost('/manager/icr/creer', data, true);
+  return apiPost('/manager/icr', data, true);
 }
 
 export async function updateIcr(id: number, data: {
@@ -185,19 +174,19 @@ export async function updateIcr(id: number, data: {
   telephone?: string;
   zone?: string;
 }): Promise<any> {
-  return apiPut(`/manager/icr/modifier/${id}`, data, true);
+  return apiPut(`/manager/icr/${id}`, data, true);
 }
 
 export async function getIcrs(): Promise<any> {
-  return apiGet('/manager/icrs', true);
+  return apiGet('/manager/icr', true);
 }
 
 export async function desactiverIcr(id: number): Promise<any> {
-  return apiPut(`/manager/icr/desactiver/${id}`, {}, true);
+  return apiDelete(`/manager/icr/${id}`, true);
 }
 
 export async function activerIcr(id: number): Promise<any> {
-  return apiPut(`/manager/icr/activer/${id}`, {}, true);
+  return apiPut(`/manager/icr/${id}/activer`, {}, true);
 }
 
 // ========== GESTION DES RESPONSABLES DE DÉPÔT (PAR MANAGER) ==========
@@ -209,7 +198,7 @@ export async function createResponsableDepot(data: {
   password: string;
   telephone: string;
 }): Promise<any> {
-  return apiPost('/manager/responsable/creer', data, true);
+  return apiPost('/manager/responsables-depot', data, true);
 }
 
 export async function updateResponsableDepot(id: number, data: {
@@ -217,102 +206,19 @@ export async function updateResponsableDepot(id: number, data: {
   prenom?: string;
   telephone?: string;
 }): Promise<any> {
-  return apiPut(`/manager/responsable/modifier/${id}`, data, true);
+  return apiPut(`/manager/responsables-depot/${id}`, data, true);
 }
 
 export async function getResponsablesDepot(): Promise<any> {
-  return apiGet('/manager/responsables', true);
+  return apiGet('/manager/responsables-depot', true);
 }
 
 export async function desactiverResponsableDepot(id: number): Promise<any> {
-  return apiPut(`/manager/responsable/desactiver/${id}`, {}, true);
+  return apiDelete(`/manager/responsables-depot/${id}`, true);
 }
 
 export async function activerResponsableDepot(id: number): Promise<any> {
-  return apiPut(`/manager/responsable/activer/${id}`, {}, true);
-}
-
-// ========== GESTION DES GÉRANTS (PAR ICR) ==========
-
-export async function createGerant(data: {
-  nom: string;
-  prenom: string;
-  email: string;
-  password: string;
-  telephone: string;
-  id_station: number;
-}): Promise<any> {
-  return apiPost('/icr/gerant/creer', data, true);
-}
-
-export async function getGerants(): Promise<any> {
-  return apiGet('/icr/gerants', true);
-}
-
-export async function desactiverGerant(id: number): Promise<any> {
-  return apiPut(`/icr/gerant/desactiver/${id}`, {}, true);
-}
-
-export async function activerGerant(id: number): Promise<any> {
-  return apiPut(`/icr/gerant/activer/${id}`, {}, true);
-}
-
-// ========== GESTION DES CHAUFFEURS (PAR ICR) ==========
-
-export async function createChauffeur(data: {
-  nom: string;
-  prenom: string;
-  email: string;
-  password: string;
-  telephone: string;
-  permis: string;
-}): Promise<any> {
-  return apiPost('/icr/chauffeur/creer', data, true);
-}
-
-export async function updateChauffeur(id: number, data: {
-  nom?: string;
-  prenom?: string;
-  telephone?: string;
-  permis?: string;
-}): Promise<any> {
-  return apiPut(`/icr/chauffeur/modifier/${id}`, data, true);
-}
-
-export async function getChauffeurs(): Promise<any> {
-  return apiGet('/icr/chauffeurs', true);
-}
-
-export async function desactiverChauffeur(id: number): Promise<any> {
-  return apiPut(`/icr/chauffeur/desactiver/${id}`, {}, true);
-}
-
-export async function activerChauffeur(id: number): Promise<any> {
-  return apiPut(`/icr/chauffeur/activer/${id}`, {}, true);
-}
-
-// ========== GESTION DES POMPISTES (PAR GÉRANT) ==========
-
-export async function createPompiste(data: {
-  nom: string;
-  prenom: string;
-  email: string;
-  password: string;
-  telephone: string;
-}): Promise<any> {
-  return apiPost('/gerant/pompiste/creer', data, true);
-}
-
-export async function getPompistes(): Promise<any> {
-  return apiGet('/gerant/pompistes', true);
-}
-
-export async function desactiverPompiste(id: number): Promise<any> {
-  return apiPut(`/gerant/pompiste/desactiver/${id}`, {}, true);
-}
-
-export async function activerPompiste(id: number): Promise<any> {
-  return apiPut(`/gerant/pompiste/activer/${id}`, {}, true);
+  return apiPut(`/manager/responsables-depot/${id}/activer`, {}, true);
 }
 
 // ========== GESTION DES STATIONS ==========
@@ -325,6 +231,12 @@ export async function getStationById(id: number): Promise<any> {
   return apiGet(`/stations/${id}`, false);
 }
 
+// ========== GESTION DES DÉPÔTS ==========
+
+export async function getDepots(): Promise<any> {
+  return apiGet('/depots', true);
+}
+
 // ========== GESTION DES BONS (PAR FOURNISSEUR) ==========
 
 export async function createBon(data: {
@@ -334,23 +246,114 @@ export async function createBon(data: {
   id_depot: number;
   id_icr: number;
 }): Promise<any> {
-  return apiPost('/fournisseur/bon/creer', data, true);
+  return apiPost('/bons', data, true);
 }
 
-export async function signerBon(id: number, signature: string, code_verification: string): Promise<any> {
-  return apiPost(`/fournisseur/bon/signer/${id}`, { signature_fournisseur: signature, code_verification }, true);
+export async function signerBon(id: number, signature_fournisseur: string, code_verification: string): Promise<any> {
+  return apiPut(`/bons/${id}/sign`, { signature_fournisseur, code_verification }, true);
+}
+
+export async function transmettreBon(id: number): Promise<any> {
+  return apiPost(`/bons/${id}/transmit`, {}, true);
 }
 
 export async function getHistoriqueBons(): Promise<any> {
-  return apiGet('/fournisseur/bons/historique', true);
+  // Récupérer l'ID du fournisseur depuis localStorage
+  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const fournisseurId = user.fournisseur?.id_fournisseur;
+  
+  if (!fournisseurId) {
+    throw new Error('ID fournisseur non trouvé');
+  }
+  
+  return apiGet(`/fournisseurs/${fournisseurId}/history`, true);
+}
+
+export async function suivreBon(id: number): Promise<any> {
+  return apiGet(`/bons/${id}/track`, true);
+}
+
+export async function annulerBon(id: number, motif?: string): Promise<any> {
+  return apiDelete(`/bons/${id}`, true);
 }
 
 // ========== GESTION DES PRIX (PAR MANAGER) ==========
 
-export async function fixerPrix(prix_essence: number, prix_gasoil: number): Promise<any> {
-  return apiPost('/manager/prix/fixer', { prix_essence, prix_gasoil }, true);
+export async function fixerPrix(essence: number, gasoil: number): Promise<any> {
+  return apiPost('/manager/prix-carburant', { 
+    type_carburant: 'essence', 
+    prix_litre: essence,
+    date_application: new Date().toISOString().split('T')[0]
+  }, true);
 }
 
 export async function getPrix(): Promise<any> {
-  return apiGet('/manager/prix', true);
+  return apiGet('/manager/prix-carburant', true);
+}
+
+// ========== TABLEAU DE BORD MANAGER ==========
+
+export async function getDashboardData(): Promise<any> {
+  return apiGet('/manager/dashboard', true);
+}
+
+export async function getStocks(): Promise<any> {
+  return apiGet('/manager/stocks', true);
+}
+
+export async function getSuiviLivraisons(): Promise<any> {
+  return apiGet('/manager/livraisons/suivi', true);
+}
+
+export async function getStatistiques(params?: any): Promise<any> {
+  return apiGet('/manager/statistiques', true);
+}
+
+export async function getAlertes(): Promise<any> {
+  return apiGet('/manager/alertes', true);
+}
+// ========== GESTION DES RESPONSABLES DE DÉPÔT (POUR LE RESPONSABLE LUI-MÊME) ==========
+
+export async function getResponsableProfil(id_responsable: number): Promise<any> {
+  return apiGet(`/responsable-depot/profil/${id_responsable}`, true);
+}
+
+export async function updateResponsableProfil(id_responsable: number, data: {
+  nom?: string;
+  prenom?: string;
+  telephone?: string;
+}): Promise<any> {
+  return apiPut(`/responsable-depot/profil/${id_responsable}`, data, true);
+}
+
+// ========== GESTION DES BONS POUR RESPONSABLE ==========
+
+export async function getBonsRecus(id_responsable: number): Promise<any> {
+  return apiGet(`/responsable-depot/bons-recus/${id_responsable}`, true);
+}
+
+export async function getDetailBon(id_bon: number): Promise<any> {
+  return apiGet(`/responsable-depot/bon/${id_bon}`, true);
+}
+
+export async function verifierCodeChargement(id_bon: number, code: string): Promise<any> {
+  return apiPost(`/responsable-depot/verifier-code`, { id_bon, code }, true);
+}
+
+export async function autoriserChargement(id_bon: number): Promise<any> {
+  return apiPost(`/responsable-depot/autoriser-chargement`, { id_bon }, true);
+}
+
+export async function terminerChargement(id_bon: number, quantite_chargee: number): Promise<any> {
+  return apiPost(`/responsable-depot/terminer-chargement`, { id_bon, quantite_chargee }, true);
+}
+
+// ========== GESTION DES STOCKS POUR RESPONSABLE ==========
+
+export async function getStockDepot(id_responsable: number): Promise<any> {
+  return apiGet(`/responsable-depot/stock/${id_responsable}`, true);
+}
+
+export async function getHistoriqueSorties(id_responsable: number): Promise<any> {
+  return apiGet(`/responsable-depot/historique/${id_responsable}`, true);
 }
