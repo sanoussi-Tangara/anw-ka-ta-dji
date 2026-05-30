@@ -87,35 +87,87 @@ class ChauffeurController extends Controller
     }
 
     // 4. Voir la mission en cours
-    public function missionEnCours($id_chauffeur)
-    {
-        $chauffeur = Chauffeur::findOrFail($id_chauffeur);
-        $mission = $chauffeur->mission_en_cours;
-
-        if (!$mission) {
-            return response()->json(['message' => 'Aucune mission en cours'], 404);
-        }
-
-        $mission->load(['bon.depot', 'livraisons.station', 'camion']);
-
-        // Ajouter l'itinéraire
-        $itineraire = [];
-        foreach ($mission->livraisons as $livraison) {
-            $itineraire[] = [
-                'station' => $livraison->station->nom,
-                'adresse' => $livraison->station->adresse,
-                'quantite_prevue' => $livraison->quantite_prevue,
-                'code_validation' => $livraison->code_validation,
-                'statut' => $livraison->statut
-            ];
-        }
-
+public function missionEnCours($id_chauffeur)
+{
+    $chauffeur = Chauffeur::findOrFail($id_chauffeur);
+    
+    $mission = Mission::where('id_chauffeur', $chauffeur->id_chauffeur)
+        ->whereIn('statut', ['planifiee', 'en_cours'])
+        ->with([
+            'bon.depot',
+            'bon.fournisseur',
+            'camion',
+            'livraisons.station',
+            'certificat'  // ← Important pour le certificat
+        ])
+        ->first();
+    
+    if (!$mission) {
         return response()->json([
-            'mission' => $mission,
-            'itineraire' => $itineraire,
-            'point_depart' => $mission->bon->depot->localisation
-        ]);
+            'has_mission' => false,
+            'mission' => null
+        ], 200);
     }
+
+    // Log pour debug
+    \Log::info('Certificat trouvé: ' . ($mission->certificat ? 'oui' : 'non'));
+    if ($mission->certificat) {
+        \Log::info('Signature ICR: ' . ($mission->certificat->signature_icr ? 'oui' : 'non'));
+        \Log::info('Signature Chauffeur: ' . ($mission->certificat->signature_chauffeur ? 'oui' : 'non'));
+    }
+
+    return response()->json([
+        'has_mission' => true,
+        'mission' => [
+            'id_mission' => $mission->id_mission,
+            'statut' => $mission->statut,
+            'date_debut' => $mission->date_debut,
+            'date_depart' => $mission->date_depart,
+            'bon' => [
+                'id_bon' => $mission->bon->id_bon,
+                'code_verification' => $mission->bon->code_verification,
+                'type_carburant' => $mission->bon->type_carburant,
+                'quantite_commandee' => $mission->bon->quantite_commandee,
+                'quantite_chargee' => $mission->bon->quantite_chargee,
+                'depot' => $mission->bon->depot ? [
+                    'nom' => $mission->bon->depot->nom,
+                    'localisation' => $mission->bon->depot->localisation
+                ] : null
+            ],
+            'camion' => [
+                'id_camion' => $mission->camion->id_camion,
+                'immatriculation' => $mission->camion->immatriculation,
+                'capacite' => $mission->camion->capacite,
+                'type_carburant' => $mission->camion->type_carburant
+            ],
+            'livraisons' => $mission->livraisons->map(function($livraison) {
+                return [
+                    'id_livraison' => $livraison->id_livraison,
+                    'quantite_prevue' => $livraison->quantite_prevue,
+                    'quantite_livree' => $livraison->quantite_livree,
+                    'code_validation' => $livraison->code_validation,
+                    'statut' => $livraison->statut,
+                    'date_livraison' => $livraison->date_livraison,
+                    'station' => [
+                        'id_station' => $livraison->station->id_station,
+                        'nom' => $livraison->station->nom,
+                        'adresse' => $livraison->station->adresse,
+                        'latitude' => $livraison->station->latitude,
+                        'longitude' => $livraison->station->longitude
+                    ]
+                ];
+            }),
+            'certificat' => $mission->certificat ? [
+                'id_certificat' => $mission->certificat->id_certificat,
+                'signature_icr' => $mission->certificat->signature_icr,
+                'signature_chauffeur' => $mission->certificat->signature_chauffeur,
+                'est_signe_icr' => !empty($mission->certificat->signature_icr),
+                'est_signe_chauffeur' => !empty($mission->certificat->signature_chauffeur),
+                'est_complet' => !empty($mission->certificat->signature_icr) && !empty($mission->certificat->signature_chauffeur)
+            ] : null  // ← S'assurer que c'est null si pas de certificat
+        ]
+    ]);
+}
 
     // 5. Démarrer la mission (activer GPS)
     public function demarrerMission($id_mission)
@@ -172,34 +224,28 @@ class ChauffeurController extends Controller
     // ==============================================
 
     // 7. Signer le certificat de transport
-    public function signerCertificat(Request $request)
-    {
-        $request->validate([
-            'id_mission' => 'required|exists:missions,id_mission',
-            'signature' => 'required|string'
-        ]);
+  public function signerCertificat(Request $request)
+{
+    $request->validate([
+        'id_mission' => 'required|exists:missions,id_mission',
+        'signature' => 'required|string'
+    ]);
 
-        $mission = Mission::findOrFail($request->id_mission);
-        $certificat = $mission->certificat;
+    $mission = Mission::findOrFail($request->id_mission);
+    $certificat = $mission->certificat;
 
-        if (!$certificat) {
-            return response()->json(['message' => 'Aucun certificat trouvé'], 404);
-        }
-
-        $certificat->signature_chauffeur = $request->signature;
-        
-        // Si l'ICR a déjà signé
-        if ($certificat->signature_icr) {
-            $certificat->statut = 'signe';
-        }
-        
-        $certificat->save();
-
-        return response()->json([
-            'message' => 'Certificat signé avec succès',
-            'certificat' => $certificat
-        ]);
+    if (!$certificat) {
+        return response()->json(['message' => 'Aucun certificat trouvé'], 404);
     }
+
+    $certificat->signature_chauffeur = $request->signature;
+    $certificat->save();
+
+    return response()->json([
+        'message' => 'Certificat signé avec succès',
+        'certificat' => $certificat
+    ]);
+}
 
     // ==============================================
     // 🔹 GESTION DES LIVRAISONS

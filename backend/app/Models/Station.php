@@ -17,6 +17,7 @@ class Station extends Model
         'adresse',
         'latitude',
         'longitude',
+        'id_icr',
         'id_gerant'
     ];
 

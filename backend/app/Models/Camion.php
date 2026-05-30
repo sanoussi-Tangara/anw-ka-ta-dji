@@ -11,14 +11,15 @@ class Camion extends Model
 
     protected $table = 'camions';
     protected $primaryKey = 'id_camion';
-
-    protected $fillable = [
-        'immatriculation',
-        'capacite',
-        'type_carburant',
-        'statut',
-        'id_chauffeur'
-    ];
+// app/Models/Camion.php
+protected $fillable = [
+    'id_icr',           // ← AJOUTER CETTE LIGNE
+    'immatriculation',
+    'capacite',
+    'type_carburant',
+    'statut',
+    'id_chauffeur'
+];
 
     // ========== RELATIONS ==========
 

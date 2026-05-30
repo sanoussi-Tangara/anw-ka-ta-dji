@@ -54,17 +54,23 @@ class AuthController extends Controller
 
         // 7. Récupérer l'ID spécifique selon le rôle
         $specificId = $this->getSpecificId($user);
+        
+        // 8. Récupérer l'objet complet du rôle
+        $roleObject = $this->getRoleObject($user);
 
-        // 8. Retourner la réponse
+        // 9. Retourner la réponse
         return response()->json([
             'message' => 'Connexion réussie',
             'user' => [
-                'id' => $user->id_utilisateur,
+                'id_utilisateur' => $user->id_utilisateur,
                 'nom' => $user->nom,
                 'prenom' => $user->prenom,
                 'email' => $user->email,
+                'telephone' => $user->telephone,
                 'role' => $user->role,
-                'specific_id' => $specificId
+                'statut' => $user->statut,
+                'specific_id' => $specificId,
+                $user->role => $roleObject
             ],
             'token' => $token,
             'redirect_to' => $this->getRedirectPath($user->role)
@@ -108,12 +114,15 @@ class AuthController extends Controller
         return response()->json([
             'message' => 'Inscription réussie',
             'user' => [
-                'id' => $user->id_utilisateur,
+                'id_utilisateur' => $user->id_utilisateur,
                 'nom' => $user->nom,
                 'prenom' => $user->prenom,
                 'email' => $user->email,
+                'telephone' => $user->telephone,
                 'role' => 'consommateur',
-                'specific_id' => $consommateur->id_consommateur
+                'statut' => $user->statut,
+                'specific_id' => $consommateur->id_consommateur,
+                'consommateur' => $consommateur
             ],
             'token' => $token,
             'redirect_to' => '/consommateur/dashboard'
@@ -138,16 +147,19 @@ class AuthController extends Controller
     {
         $user = $request->user();
         $specificId = $this->getSpecificId($user);
+        $roleObject = $this->getRoleObject($user);
 
         return response()->json([
             'user' => [
-                'id' => $user->id_utilisateur,
+                'id_utilisateur' => $user->id_utilisateur,
                 'nom' => $user->nom,
                 'prenom' => $user->prenom,
                 'email' => $user->email,
                 'telephone' => $user->telephone,
                 'role' => $user->role,
-                'specific_id' => $specificId
+                'statut' => $user->statut,
+                'specific_id' => $specificId,
+                $user->role => $roleObject
             ]
         ]);
     }
@@ -162,7 +174,7 @@ class AuthController extends Controller
             'fournisseur' => '/fournisseur/dashboard',
             'manager' => '/manager/dashboard',
             'icr' => '/icr/dashboard',
-            'responsable_depot' => '/responsable-depot/dashboard',
+            'responsable_depot' => '/responsabledepot/dashboard',
             'chauffeur' => '/chauffeur/dashboard',
             'gerant' => '/gerant/dashboard',
             'pompiste' => '/pompiste/dashboard',
@@ -184,6 +196,23 @@ class AuthController extends Controller
             'responsable_depot' => fn() => $user->responsableDepot?->id_responsable,
             'manager' => fn() => $user->manager?->id_manager,
             'admin' => fn() => $user->administrateur?->id_admin,
+        ];
+
+        return isset($relations[$user->role]) ? $relations[$user->role]() : null;
+    }
+
+    private function getRoleObject($user)
+    {
+        $relations = [
+            'fournisseur' => fn() => $user->fournisseur,
+            'icr' => fn() => $user->icr,
+            'gerant' => fn() => $user->gerant,
+            'chauffeur' => fn() => $user->chauffeur,
+            'pompiste' => fn() => $user->pompiste,
+            'consommateur' => fn() => $user->consommateur,
+            'responsable_depot' => fn() => $user->responsableDepot,
+            'manager' => fn() => $user->manager,
+            'admin' => fn() => $user->administrateur,
         ];
 
         return isset($relations[$user->role]) ? $relations[$user->role]() : null;

@@ -333,7 +333,6 @@ class MissionController extends Controller
     {
         $request->validate([
             'id_station' => 'required|exists:stations,id_station',
-            'id_gerant' => 'required|exists:gerants,id_gerant',
             'quantite_prevue' => 'required|numeric|min:1',
             'code_validation' => 'required|string|size:4'
         ]);
@@ -347,14 +346,12 @@ class MissionController extends Controller
         }
 
         $livraison = Livraison::create([
+            'id_mission' => $id_mission,
             'id_station' => $request->id_station,
-            'id_gerant' => $request->id_gerant,
             'quantite_prevue' => $request->quantite_prevue,
             'code_validation' => $request->code_validation,
             'statut' => 'en_attente'
         ]);
-
-        $mission->livraisons()->attach($livraison->id_livraison);
 
         return response()->json([
             'message' => 'Livraison ajoutée à la mission',
@@ -374,7 +371,6 @@ class MissionController extends Controller
             ], 400);
         }
 
-        $mission->livraisons()->detach($id_livraison);
         $livraison->delete();
 
         return response()->json([
@@ -383,10 +379,100 @@ class MissionController extends Controller
     }
 
     // ==============================================
+    // 🔹 SUIVI GPS
+    // ==============================================
+
+    // 15. Chauffeur : récupérer sa mission en cours
+    public function getMissionEnCours(Request $request)
+    {
+        $user = auth()->user();
+        $chauffeur = Chauffeur::where('id_utilisateur', $user->id_utilisateur)->first();
+        
+        if (!$chauffeur) {
+            return response()->json(['message' => 'Chauffeur non trouvé'], 404);
+        }
+        
+        $mission = Mission::where('id_chauffeur', $chauffeur->id_chauffeur)
+            ->whereIn('statut', ['planifiee', 'en_cours'])
+            ->with(['bon', 'camion', 'livraisons.station'])
+            ->first();
+        
+        if (!$mission) {
+            return response()->json(['message' => 'Aucune mission en cours'], 404);
+        }
+        
+        return response()->json(['mission' => $mission]);
+    }
+
+    // 16. Chauffeur : mettre à jour sa position
+    public function updatePosition(Request $request, $id_mission)
+    {
+        $request->validate([
+            'latitude' => 'required|numeric|between:-90,90',
+            'longitude' => 'required|numeric|between:-180,180',
+        ]);
+
+        $mission = Mission::findOrFail($id_mission);
+        
+        // Vérifier que le chauffeur est bien celui de la mission
+        $user = auth()->user();
+        $chauffeur = Chauffeur::where('id_utilisateur', $user->id_utilisateur)->first();
+        
+        if (!$chauffeur || $mission->id_chauffeur != $chauffeur->id_chauffeur) {
+            return response()->json(['message' => 'Non autorisé'], 403);
+        }
+
+        $mission->derniere_latitude = $request->latitude;
+        $mission->derniere_longitude = $request->longitude;
+        $mission->derniere_position_at = now();
+        $mission->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Position mise à jour',
+            'position' => [
+                'latitude' => $mission->derniere_latitude,
+                'longitude' => $mission->derniere_longitude,
+                'date' => $mission->derniere_position_at
+            ]
+        ]);
+    }
+
+    // 17. ICR : récupérer la position d'une mission
+    public function getPosition($id_mission)
+    {
+        $mission = Mission::with(['chauffeur.user', 'camion'])->findOrFail($id_mission);
+        
+        if (!$mission->derniere_latitude || !$mission->derniere_longitude) {
+            return response()->json([
+                'has_position' => false,
+                'message' => 'Position non disponible pour cette mission'
+            ]);
+        }
+
+        return response()->json([
+            'has_position' => true,
+            'position' => [
+                'latitude' => $mission->derniere_latitude,
+                'longitude' => $mission->derniere_longitude,
+                'date' => $mission->derniere_position_at
+            ],
+            'chauffeur' => [
+                'nom' => $mission->chauffeur->user->nom ?? '',
+                'prenom' => $mission->chauffeur->user->prenom ?? '',
+                'telephone' => $mission->chauffeur->user->telephone ?? ''
+            ],
+            'camion' => [
+                'immatriculation' => $mission->camion->immatriculation ?? ''
+            ]
+        ]);
+    }
+
+    // ==============================================
     // 🔹 STATISTIQUES
     // ==============================================
 
-    // 15. Statistiques des missions
+    // 18. Statistiques des missions
     public function statistiques()
     {
         $stats = [
@@ -415,7 +501,7 @@ class MissionController extends Controller
         return response()->json($stats);
     }
 
-    // 16. Dashboard des missions
+    // 19. Dashboard des missions
     public function dashboard()
     {
         $stats = [
@@ -440,7 +526,7 @@ class MissionController extends Controller
         ]);
     }
 
-    // 17. Progression d'une mission
+    // 20. Progression d'une mission
     public function progression($id_mission)
     {
         $mission = Mission::with(['livraisons'])->findOrFail($id_mission);

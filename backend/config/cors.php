@@ -3,7 +3,15 @@
 return [
     'paths' => ['api/*', 'sanctum/csrf-cookie', 'login', 'register', 'logout'],
     'allowed_methods' => ['*'],
-    'allowed_origins' => ['http://localhost:3000', 'http://127.0.0.1:3000'],
+    'allowed_origins' => [
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
+        env('FRONTEND_URL', 'http://localhost:3000'),
+    ],
+    'allowed_origins_patterns' => [
+        '#^http://192\.168\.\d+\.\d+:3000$#',
+        '#^http://10\.\d+\.\d+\.\d+:3000$#',
+    ],
     'allowed_origins_patterns' => [],
     'allowed_headers' => ['*'],
     'exposed_headers' => [],

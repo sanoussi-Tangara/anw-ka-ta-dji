@@ -8,17 +8,16 @@ use Illuminate\Http\Request;
 
 class NotificationController extends Controller
 {
-    public function __construct()
-    {
-        $this->middleware('auth:sanctum');
-    }
-
     /**
      * Récupérer toutes les notifications de l'utilisateur connecté
      */
     public function index(Request $request)
     {
         $user = auth()->user();
+        
+        if (!$user) {
+            return response()->json(['message' => 'Non authentifié'], 401);
+        }
         
         $query = Notification::where('id_destinataire', $user->id_utilisateur);
 
@@ -46,6 +45,10 @@ class NotificationController extends Controller
     {
         $user = auth()->user();
         
+        if (!$user) {
+            return response()->json(['message' => 'Non authentifié'], 401);
+        }
+        
         $notifications = Notification::where('id_destinataire', $user->id_utilisateur)
             ->where('lu', false)
             ->orderBy('created_at', 'desc')
@@ -64,6 +67,10 @@ class NotificationController extends Controller
     {
         $user = auth()->user();
         
+        if (!$user) {
+            return response()->json(['message' => 'Non authentifié'], 401);
+        }
+        
         $notification = Notification::where('id_destinataire', $user->id_utilisateur)
             ->findOrFail($id);
 
@@ -76,6 +83,10 @@ class NotificationController extends Controller
     public function marquerLue($id)
     {
         $user = auth()->user();
+        
+        if (!$user) {
+            return response()->json(['message' => 'Non authentifié'], 401);
+        }
         
         $notification = Notification::where('id_destinataire', $user->id_utilisateur)
             ->findOrFail($id);
@@ -95,6 +106,10 @@ class NotificationController extends Controller
     {
         $user = auth()->user();
         
+        if (!$user) {
+            return response()->json(['message' => 'Non authentifié'], 401);
+        }
+        
         $count = Notification::where('id_destinataire', $user->id_utilisateur)
             ->where('lu', false)
             ->update(['lu' => true]);
@@ -111,6 +126,10 @@ class NotificationController extends Controller
     {
         $user = auth()->user();
         
+        if (!$user) {
+            return response()->json(['message' => 'Non authentifié'], 401);
+        }
+        
         $notification = Notification::where('id_destinataire', $user->id_utilisateur)
             ->findOrFail($id);
 
@@ -125,6 +144,10 @@ class NotificationController extends Controller
     public function deleteAll()
     {
         $user = auth()->user();
+        
+        if (!$user) {
+            return response()->json(['message' => 'Non authentifié'], 401);
+        }
         
         $count = Notification::where('id_destinataire', $user->id_utilisateur)->delete();
 
@@ -146,9 +169,14 @@ class NotificationController extends Controller
 
         $user = auth()->user();
         
+        if (!$user) {
+            return response()->json(['message' => 'Non authentifié'], 401);
+        }
+        
         // Vérifier que l'utilisateur a le droit d'envoyer des notifications
-        if (!$user->isManager() && !$user->isAdmin() && !$user->isIcr()) {
-            return response()->json(['message' => 'Accès non autorisé'], 403);
+        $allowedRoles = ['admin', 'manager', 'super_admin'];
+        if (!in_array($user->role, $allowedRoles)) {
+            return response()->json(['message' => 'Accès non autorisé. Seuls les admins et managers peuvent envoyer des notifications.'], 403);
         }
 
         $notification = Notification::envoyer(
@@ -169,6 +197,10 @@ class NotificationController extends Controller
     public function statistiques()
     {
         $user = auth()->user();
+        
+        if (!$user) {
+            return response()->json(['message' => 'Non authentifié'], 401);
+        }
         
         $stats = [
             'total' => Notification::where('id_destinataire', $user->id_utilisateur)->count(),

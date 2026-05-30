@@ -95,20 +95,27 @@ class ResponsableDepotController extends Controller
     // ==============================================
 
     // 6. Voir les bons reçus (notifications)
-    public function bonsRecus($id_responsable)
-    {
-        $responsable = ResponsableDepot::with('depot')->findOrFail($id_responsable);
+public function bonsRecus($id_responsable)
+{
+    try {
+        $responsable = ResponsableDepot::findOrFail($id_responsable);
+        $depot = Depot::where('id_responsable', $id_responsable)->first();
         
-        $bons = Bon::where('id_depot', $responsable->depot->id_depot)
-            ->with('fournisseur.user')
+        if (!$depot) {
+            return response()->json(['bons' => []]);
+        }
+        
+        $bons = Bon::where('id_depot', $depot->id_depot)
+            ->with(['fournisseur.user', 'icr.user'])
             ->orderBy('created_at', 'desc')
             ->get();
-
-        return response()->json([
-            'depot' => $responsable->depot->nom,
-            'bons' => $bons
-        ]);
+            
+        return response()->json(['bons' => $bons]);
+        
+    } catch (\Exception $e) {
+        return response()->json(['message' => 'Erreur: ' . $e->getMessage()], 500);
     }
+}
 
     // 7. Voir le détail d'un bon
     public function detailBon($id_bon)
@@ -170,97 +177,353 @@ class ResponsableDepotController extends Controller
     }
 
     // 10. Suivre le chargement (fin de chargement)
-    public function terminerChargement(Request $request)
-    {
-        $request->validate([
-            'id_bon' => 'required|exists:bons,id_bon',
-            'quantite_chargee' => 'required|numeric|min:0'
-        ]);
+    // 10. Terminer le chargement avec vérification de stock
+public function terminerChargement(Request $request)
+{
+    $request->validate([
+        'id_bon' => 'required|exists:bons,id_bon',
+        'quantite_chargee' => 'required|numeric|min:0.01'
+    ]);
 
+    try {
         $bon = Bon::findOrFail($request->id_bon);
-        $bon->quantite_chargee = $request->quantite_chargee;
-        $bon->statut = 'termine';
-        $bon->save();
-
-        // Mettre à jour le stock du dépôt
+        
+        // Vérifier que le bon est en cours
+        if ($bon->statut !== 'en_cours') {
+            return response()->json([
+                'message' => 'Ce bon n\'est pas en cours de chargement'
+            ], 400);
+        }
+        
+        // Vérifier que la quantité ne dépasse pas la commande
+        if ($request->quantite_chargee > $bon->quantite_commandee) {
+            return response()->json([
+                'message' => 'La quantité chargée ne peut pas dépasser la quantité commandée'
+            ], 400);
+        }
+        
+        // Vérifier le stock disponible
         $stock = Stock::where('id_depot', $bon->id_depot)
             ->where('type_carburant', $bon->type_carburant)
             ->first();
-
-        if ($stock) {
-            $stock->quantite -= $request->quantite_chargee;
-            $stock->date_mise_a_jour = now();
-            $stock->save();
+        
+        if (!$stock || $stock->quantite < $request->quantite_chargee) {
+            return response()->json([
+                'message' => 'Stock insuffisant pour ce chargement',
+                'stock_disponible' => $stock->quantite ?? 0,
+                'quantite_demandee' => $request->quantite_chargee
+            ], 400);
         }
-
+        
+        // Mettre à jour le bon
+        $bon->quantite_chargee = $request->quantite_chargee;
+        $bon->fin_chargement = now();
+        $bon->statut = 'termine';
+        $bon->save();
+        
+        // Mettre à jour le stock
+        $stock->quantite -= $request->quantite_chargee;
+        $stock->date_mise_a_jour = now();
+        $stock->save();
+        
+        // Vérifier si stock bas après déduction
+        $seuilAlerte = 5000;
+        $alerteStock = $stock->quantite < $seuilAlerte;
+        
         return response()->json([
-            'message' => 'Chargement terminé, stock mis à jour',
-            'stock_restant' => $stock->quantite ?? 0
+            'message' => 'Chargement terminé avec succès',
+            'bon' => $bon,
+            'stock_restant' => $stock->quantite,
+            'alerte_stock' => $alerteStock
         ]);
+        
+    } catch (\Exception $e) {
+        return response()->json(['message' => 'Erreur: ' . $e->getMessage()], 500);
     }
+}
 
     // ==============================================
     // 🔹 GESTION DES STOCKS
     // ==============================================
 
-    // 11. Voir le stock du dépôt
-    public function voirStock($id_responsable)
-    {
-        $responsable = ResponsableDepot::with('depot.stocks')->findOrFail($id_responsable);
+  // ==============================================
+// 🔹 GESTION COMPLÈTE DES STOCKS
+// ==============================================
+
+// 11. Voir le stock du dépôt
+// 11. Voir le stock du dépôt
+public function voirStock($id_responsable)
+{
+    try {
+        $responsable = ResponsableDepot::with('depot')->findOrFail($id_responsable);
+        
+        if (!$responsable->depot) {
+            return response()->json([
+                'message' => 'Aucun dépôt associé à ce responsable',
+                'stocks' => []
+            ], 404);
+        }
+        
+        $stocks = Stock::where('id_depot', $responsable->depot->id_depot)->get();
+        
+        // NE PAS ÉCRASER - Utiliser le seuil existant
+        foreach ($stocks as $stock) {
+            // Utiliser le seuil de la base, ou 5000 par défaut si null
+            $seuil = $stock->seuil_alerte ?? 5000;
+            $stock->alerte = $stock->quantite < $seuil;
+            $stock->seuil_alerte = $seuil; // Garder la vraie valeur
+        }
         
         return response()->json([
             'depot' => $responsable->depot->nom,
-            'stocks' => $responsable->depot->stocks
+            'stocks' => $stocks
         ]);
-    }
-
-    // 12. Historique des sorties (bons terminés)
-    public function historiqueSorties($id_responsable)
-    {
-        $responsable = ResponsableDepot::with('depot')->findOrFail($id_responsable);
         
-        $historique = Bon::where('id_depot', $responsable->depot->id_depot)
-            ->whereIn('statut', ['termine', 'annule'])
-            ->with('fournisseur.user')
-            ->orderBy('updated_at', 'desc')
-            ->get();
-
-        return response()->json([
-            'historique' => $historique
-        ]);
-    }
-
-    // ==============================================
-    // 🔹 PROFIL
-    // ==============================================
-
-    // 13. Voir le profil
-    public function profil($id_responsable)
-    {
-        $responsable = ResponsableDepot::with(['user', 'depot'])->findOrFail($id_responsable);
-        return response()->json($responsable);
-    }
-
-    // 14. Modifier le profil
-    public function updateProfil(Request $request, $id_responsable)
-    {
-        $responsable = ResponsableDepot::findOrFail($id_responsable);
-        $user = $responsable->user;
-
-        $request->validate([
-            'nom' => 'nullable|string|max:100',
-            'prenom' => 'nullable|string|max:100',
-            'telephone' => 'nullable|string|unique:users,telephone,' . $user->id_utilisateur . ',id_utilisateur'
-        ]);
-
-        if ($request->has('nom')) $user->nom = $request->nom;
-        if ($request->has('prenom')) $user->prenom = $request->prenom;
-        if ($request->has('telephone')) $user->telephone = $request->telephone;
-        $user->save();
-
-        return response()->json([
-            'message' => 'Profil mis à jour',
-            'responsable' => $responsable->fresh('user')
-        ]);
+    } catch (\Exception $e) {
+        return response()->json(['message' => 'Erreur: ' . $e->getMessage()], 500);
     }
 }
+
+// 12. Mettre à jour le stock (ajout manuel)
+public function updateStock(Request $request, $id_responsable)
+{
+    $request->validate([
+        'type_carburant' => 'required|in:essence,gasoil',
+        'quantite' => 'required|numeric|min:0',
+        'operation' => 'required|in:add,remove,set'
+    ]);
+    
+    try {
+        $responsable = ResponsableDepot::with('depot')->findOrFail($id_responsable);
+        
+        if (!$responsable->depot) {
+            return response()->json(['message' => 'Aucun dépôt associé'], 404);
+        }
+        
+        $stock = Stock::where('id_depot', $responsable->depot->id_depot)
+            ->where('type_carburant', $request->type_carburant)
+            ->first();
+        
+        if (!$stock) {
+            // Créer le stock s'il n'existe pas - CORRECTION : AJOUT DE seuil_alerte
+            $stock = Stock::create([
+                'id_depot' => $responsable->depot->id_depot,
+                'type_carburant' => $request->type_carburant,
+                'quantite' => 0,
+                'seuil_alerte' => 5000,  // ← LIGNE AJOUTÉE (obligatoire)
+                'date_mise_a_jour' => now()
+            ]);
+        }
+        
+        // Sauvegarder l'ancienne quantité pour le message
+        $ancienneQuantite = $stock->quantite;
+        
+        // Appliquer l'opération
+        switch ($request->operation) {
+            case 'add':
+                $stock->quantite += $request->quantite;
+                $message = "Ajout de {$request->quantite} L de {$request->type_carburant}";
+                break;
+            case 'remove':
+                if ($stock->quantite < $request->quantite) {
+                    return response()->json([
+                        'message' => 'Stock insuffisant pour cette opération'
+                    ], 400);
+                }
+                $stock->quantite -= $request->quantite;
+                $message = "Retrait de {$request->quantite} L de {$request->type_carburant}";
+                break;
+            case 'set':
+                $stock->quantite = $request->quantite;
+                $message = "Stock défini à {$request->quantite} L de {$request->type_carburant}";
+                break;
+        }
+        
+        $stock->date_mise_a_jour = now();
+        $stock->save();
+        
+        // Vérifier alerte
+        $seuilAlerte = 5000;
+        if ($stock->quantite < $seuilAlerte) {
+            return response()->json([
+                'message' => $message . " ⚠️ Stock bas: {$stock->quantite} L",
+                'stock' => $stock,
+                'alerte' => true
+            ]);
+        }
+        
+        return response()->json([
+            'message' => $message,
+            'stock' => $stock,
+            'alerte' => false
+        ]);
+        
+    } catch (\Exception $e) {
+        return response()->json(['message' => 'Erreur: ' . $e->getMessage()], 500);
+    }
+}
+
+// 13. Obtenir les alertes de stock
+public function alertesStock($id_responsable)
+{
+    try {
+        $responsable = ResponsableDepot::with('depot')->findOrFail($id_responsable);
+        
+        if (!$responsable->depot) {
+            return response()->json(['alertes' => []]);
+        }
+        
+        $stocks = Stock::where('id_depot', $responsable->depot->id_depot)->get();
+        $seuilAlerte = 5000;
+        
+        $alertes = [];
+        foreach ($stocks as $stock) {
+            if ($stock->quantite < $seuilAlerte) {
+                $alertes[] = [
+                    'type_carburant' => $stock->type_carburant,
+                    'quantite' => $stock->quantite,
+                    'seuil' => $seuilAlerte,
+                    'message' => "Stock {$stock->type_carburant} bas: {$stock->quantite} L"
+                ];
+            }
+        }
+        
+        return response()->json([
+            'alertes' => $alertes,
+            'has_alertes' => count($alertes) > 0
+        ]);
+        
+    } catch (\Exception $e) {
+        return response()->json(['message' => 'Erreur: ' . $e->getMessage()], 500);
+    }
+}
+
+
+// ==============================================
+// 🔹 PROFIL
+// ==============================================
+
+// 13. Voir le profil
+public function profil($id_responsable)
+{
+    try {
+        $responsable = ResponsableDepot::with(['user', 'depot'])->findOrFail($id_responsable);
+        
+        // Ajouter les infos du dépôt si disponible
+        $depot = Depot::where('id_responsable', $id_responsable)->first();
+        
+        return response()->json([
+            'id_responsable' => $responsable->id_responsable,
+            'user' => $responsable->user,
+            'depot' => $depot ?? $responsable->depot
+        ]);
+        
+    } catch (\Exception $e) {
+        return response()->json(['message' => 'Responsable non trouvé'], 404);
+    }
+}
+
+// 14. Modifier le profil
+public function updateProfil(Request $request, $id_responsable)
+{
+    $responsable = ResponsableDepot::findOrFail($id_responsable);
+    $user = $responsable->user;
+
+    $request->validate([
+        'nom' => 'nullable|string|max:100',
+        'prenom' => 'nullable|string|max:100',
+        'telephone' => 'nullable|string|unique:users,telephone,' . $user->id_utilisateur . ',id_utilisateur'
+    ]);
+
+    if ($request->has('nom')) $user->nom = $request->nom;
+    if ($request->has('prenom')) $user->prenom = $request->prenom;
+    if ($request->has('telephone')) $user->telephone = $request->telephone;
+    $user->save();
+
+    return response()->json([
+        'message' => 'Profil mis à jour',
+        'responsable' => $responsable->fresh('user')
+    ]);
+}
+
+
+
+    // ==============================================
+    // 🔹 HISTORIQUE DES SORTIES
+    // ==============================================
+
+    public function historiqueSorties($id_responsable)
+    {
+        try {
+            $responsable = ResponsableDepot::with('depot')->findOrFail($id_responsable);
+            
+            if (!$responsable->depot) {
+                return response()->json([
+                    'historique' => [],
+                    'message' => 'Aucun dépôt associé'
+                ]);
+            }
+            
+            $historique = Bon::where('id_depot', $responsable->depot->id_depot)
+                ->whereIn('statut', ['termine', 'annule'])
+                ->with(['fournisseur.user', 'icr.user'])
+                ->orderBy('updated_at', 'desc')
+                ->get();
+            
+            return response()->json([
+                'historique' => $historique,
+                'total' => $historique->count()
+            ]);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Erreur: ' . $e->getMessage(),
+                'historique' => []
+            ], 500);
+        }
+    }
+
+
+    // 13. Mettre à jour le seuil d'alerte
+public function updateSeuilAlerte(Request $request, $id_responsable)
+{
+    $request->validate([
+        'type_carburant' => 'required|in:essence,gasoil',
+        'seuil_alerte' => 'required|numeric|min:0'
+    ]);
+    
+    try {
+        $responsable = ResponsableDepot::with('depot')->findOrFail($id_responsable);
+        
+        if (!$responsable->depot) {
+            return response()->json(['message' => 'Aucun dépôt associé'], 404);
+        }
+        
+        $stock = Stock::where('id_depot', $responsable->depot->id_depot)
+            ->where('type_carburant', $request->type_carburant)
+            ->first();
+        
+        if (!$stock) {
+            $stock = Stock::create([
+                'id_depot' => $responsable->depot->id_depot,
+                'type_carburant' => $request->type_carburant,
+                'quantite' => 0,
+                'seuil_alerte' => $request->seuil_alerte,
+                'date_mise_a_jour' => now()
+            ]);
+        } else {
+            $stock->seuil_alerte = $request->seuil_alerte;
+            $stock->save();
+        }
+        
+        return response()->json([
+            'message' => "Seuil d'alerte mis à jour: {$request->seuil_alerte} L",
+            'stock' => $stock
+        ]);
+        
+    } catch (\Exception $e) {
+        return response()->json(['message' => 'Erreur: ' . $e->getMessage()], 500);
+    }
+}
+}
+

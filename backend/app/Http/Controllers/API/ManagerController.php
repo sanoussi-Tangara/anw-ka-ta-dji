@@ -155,50 +155,50 @@ class ManagerController extends Controller
     // ==============================================
     // 🔹 GESTION DES ICR
     // ==============================================
+public function creerIcr(Request $request)
+{
+    $request->validate([
+        'nom' => 'required|string|max:100',
+        'prenom' => 'required|string|max:100',
+        'email' => 'required|email|unique:users,email',
+        'telephone' => 'required|string|max:20',
+        'password' => 'required|string|min:6',
+        'matricule' => 'required|string|max:50|unique:icr,matricule',
+        'zone' => 'nullable|string|max:100',
+        'nom_entreprise' => 'nullable|string|max:100'  // 
+    ]);
 
-    public function creerIcr(Request $request)
-    {
-        $request->validate([
-            'nom' => 'required|string|max:100',
-            'prenom' => 'required|string|max:100',
-            'email' => 'required|email|unique:users,email',
-            'telephone' => 'required|string|max:20',
-            'password' => 'required|string|min:6',
-            'matricule' => 'required|string|max:50|unique:icr,matricule',
-            'zone' => 'nullable|string|max:100'
+    DB::beginTransaction();
+
+    try {
+        $user = User::create([
+            'nom' => $request->nom,
+            'prenom' => $request->prenom,
+            'email' => $request->email,
+            'password' => Hash::make($request->password),
+            'telephone' => $request->telephone,
+            'role' => 'icr'
         ]);
 
-        DB::beginTransaction();
+        $icr = Icr::create([
+            'id_utilisateur' => $user->id_utilisateur,
+            'matricule' => $request->matricule,
+            'zone' => $request->zone,
+            'nom_entreprise' => $request->nom_entreprise  // ← AJOUTER
+        ]);
 
-        try {
-            $user = User::create([
-                'nom' => $request->nom,
-                'prenom' => $request->prenom,
-                'email' => $request->email,
-                'password' => Hash::make($request->password),
-                'telephone' => $request->telephone,
-                'role' => 'icr'
-            ]);
+        DB::commit();
 
-            $icr = Icr::create([
-                'id_utilisateur' => $user->id_utilisateur,
-                'matricule' => $request->matricule,
-                'zone' => $request->zone
-            ]);
+        return response()->json([
+            'message' => 'ICR créé avec succès',
+            'icr' => $icr->load('user')
+        ], 201);
 
-            DB::commit();
-
-            return response()->json([
-                'message' => 'ICR créé avec succès',
-                'icr' => $icr->load('user')
-            ], 201);
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            return response()->json(['message' => 'Erreur lors de la création'], 500);
-        }
+    } catch (\Exception $e) {
+        DB::rollBack();
+        return response()->json(['message' => 'Erreur lors de la création'], 500);
     }
-
+}
     public function modifierIcr(Request $request, $id_icr)
     {
         $icr = Icr::findOrFail($id_icr);
@@ -592,4 +592,56 @@ class ManagerController extends Controller
             return response()->json(['message' => 'Erreur lors de la récupération de l\'historique'], 500);
         }
     }
+
+
+ public function creerDepot(Request $request)
+{
+    $request->validate([
+        'nom' => 'required|string|max:100|unique:depots,nom',
+        'localisation' => 'required|string|max:200'
+    ]);
+
+    try {
+        // Récupérer l'ID du responsable par défaut (ou en créer un)
+        $defaultResponsable = ResponsableDepot::first();
+        
+        if (!$defaultResponsable) {
+            return response()->json(['message' => 'Aucun responsable disponible. Veuillez en créer un d\'abord.'], 400);
+        }
+
+        $depot = Depot::create([
+            'nom' => $request->nom,
+            'localisation' => $request->localisation,
+            'id_responsable' => $defaultResponsable->id_responsable
+        ]);
+
+        return response()->json([
+            'message' => 'Dépôt créé avec succès',
+            'depot' => $depot
+        ], 201);
+
+    } catch (\Exception $e) {
+        return response()->json(['message' => 'Erreur lors de la création: ' . $e->getMessage()], 500);
+    }
+}
+
+public function listerDepots()
+{
+    $depots = Depot::with('responsable.user')->get();
+    return response()->json(['depots' => $depots]);
+}
+
+public function changerResponsable(Request $request, $id_depot)
+{
+    $request->validate([
+        'id_responsable' => 'required|exists:responsables_depot,id_responsable'
+    ]);
+
+    $depot = Depot::findOrFail($id_depot);
+    $depot->id_responsable = $request->id_responsable;
+    $depot->save();
+
+    return response()->json(['message' => 'Responsable changé avec succès']);
+}
+
 }

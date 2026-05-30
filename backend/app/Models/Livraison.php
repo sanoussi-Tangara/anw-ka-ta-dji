@@ -11,20 +11,20 @@ class Livraison extends Model
 
     protected $table = 'livraisons';
     protected $primaryKey = 'id_livraison';
-
-    protected $fillable = [
-        'quantite_prevue',
-        'quantite_livree',
-        'code_validation',
-        'date_livraison',
-        'signature_gerant',
-        'signature_chauffeur',
-        'photo_compteur',
-        'statut',
-        'id_station',
-        'id_gerant',
-        'id_pompiste'
-    ];
+protected $fillable = [
+    'id_mission',        // ← AJOUTE CETTE LIGNE
+    'quantite_prevue',
+    'quantite_livree',
+    'code_validation',
+    'date_livraison',
+    'signature_gerant',
+    'signature_chauffeur',
+    'photo_compteur',
+    'statut',
+    'id_station',
+    'id_gerant',
+    'id_pompiste'
+];
 
     protected $casts = [
         'date_livraison' => 'datetime',

@@ -45,24 +45,115 @@ class CertificatController extends Controller
 
     // 3. Récupérer le certificat d'une mission
     public function getByMission($id_mission)
-    {
-        $mission = Mission::findOrFail($id_mission);
-        
-        $certificat = Certificat::where('id_mission', $id_mission)
-            ->with(['mission.bon', 'mission.chauffeur.user'])
-            ->first();
+{
+    $mission = Mission::with([
+        'bon.fournisseur.user',
+        'bon.depot',
+        'chauffeur.user',
+        'icr.user',
+        'camion',
+        'livraisons.station.gerant.user'
+    ])->findOrFail($id_mission);
+    
+    $certificat = Certificat::where('id_mission', $id_mission)->first();
 
-        if (!$certificat) {
-            return response()->json([
-                'message' => 'Aucun certificat trouvé pour cette mission'
-            ], 404);
-        }
+    // Calculer le total des quantités
+    $total_quantite_prevue = $mission->livraisons->sum('quantite_prevue');
+    $total_quantite_livree = $mission->livraisons->sum('quantite_livree');
 
-        return response()->json([
-            'certificat' => $certificat,
-            'mission' => $mission
-        ]);
-    }
+    // Retourner toutes les informations
+    return response()->json([
+        'certificat' => $certificat,
+        'mission' => [
+            'id_mission' => $mission->id_mission,
+            'statut' => $mission->statut,
+            'date_debut' => $mission->date_debut,
+            'date_fin' => $mission->date_fin,
+            'date_depart' => $mission->date_depart,
+            'date_arrivee_reelle' => $mission->date_arrivee_reelle,
+        ],
+        'bon' => [
+            'id_bon' => $mission->bon->id_bon,
+            'code_verification' => $mission->bon->code_verification,
+            'type_carburant' => $mission->bon->type_carburant,
+            'quantite_commandee' => $mission->bon->quantite_commandee,
+            'quantite_chargee' => $mission->bon->quantite_chargee,
+            'date_disponibilite' => $mission->bon->date_disponibilite,
+            'statut' => $mission->bon->statut,
+            'fournisseur' => $mission->bon->fournisseur ? [
+                'nom_societe' => $mission->bon->fournisseur->nom_societe,
+                'adresse' => $mission->bon->fournisseur->adresse,
+                'telephone' => $mission->bon->fournisseur->telephone,
+            ] : null,
+            'depot' => $mission->bon->depot ? [
+                'nom' => $mission->bon->depot->nom,
+                'localisation' => $mission->bon->depot->localisation,
+            ] : null,
+        ],
+        'icr' => [
+            'id_icr' => $mission->icr->id_icr,
+            'nom' => $mission->icr->user->nom ?? '',
+            'prenom' => $mission->icr->user->prenom ?? '',
+            'email' => $mission->icr->user->email ?? '',
+            'telephone' => $mission->icr->user->telephone ?? '',
+            'matricule' => $mission->icr->matricule ?? '',
+        ],
+        'chauffeur' => [
+            'id_chauffeur' => $mission->chauffeur->id_chauffeur,
+            'nom' => $mission->chauffeur->user->nom ?? '',
+            'prenom' => $mission->chauffeur->user->prenom ?? '',
+            'email' => $mission->chauffeur->user->email ?? '',
+            'telephone' => $mission->chauffeur->user->telephone ?? '',
+            'permis' => $mission->chauffeur->permis,
+        ],
+        'camion' => [
+            'id_camion' => $mission->camion->id_camion,
+            'immatriculation' => $mission->camion->immatriculation,
+            'capacite' => $mission->camion->capacite,
+            'type_carburant' => $mission->camion->type_carburant,
+            'statut' => $mission->camion->statut,
+        ],
+        'livraisons' => $mission->livraisons->map(function($livraison) {
+            return [
+                'id_livraison' => $livraison->id_livraison,
+                'quantite_prevue' => $livraison->quantite_prevue,
+                'quantite_livree' => $livraison->quantite_livree,
+                'code_validation' => $livraison->code_validation,
+                'date_livraison' => $livraison->date_livraison,
+                'statut' => $livraison->statut,
+                'signature_gerant' => $livraison->signature_gerant,
+                'signature_chauffeur' => $livraison->signature_chauffeur,
+                'photo_compteur' => $livraison->photo_compteur,
+                'station' => [
+                    'id_station' => $livraison->station->id_station,
+                    'nom' => $livraison->station->nom,
+                    'adresse' => $livraison->station->adresse,
+                    'latitude' => $livraison->station->latitude,
+                    'longitude' => $livraison->station->longitude,
+                    'gerant' => $livraison->station->gerant ? [
+                        'nom' => $livraison->station->gerant->user->nom ?? '',
+                        'prenom' => $livraison->station->gerant->user->prenom ?? '',
+                        'telephone' => $livraison->station->gerant->user->telephone ?? '',
+                    ] : null,
+                ],
+            ];
+        }),
+        'totaux' => [
+            'quantite_totale_commandee' => $mission->bon->quantite_commandee,
+            'quantite_totale_prevue' => $total_quantite_prevue,
+            'quantite_totale_livree' => $total_quantite_livree,
+            'nombre_livraisons' => $mission->livraisons->count(),
+            'livraisons_effectuees' => $mission->livraisons->where('statut', 'validee')->count(),
+        ],
+        'signatures' => [
+            'signature_icr' => $certificat ? $certificat->signature_icr : null,
+            'signature_chauffeur' => $certificat ? $certificat->signature_chauffeur : null,
+            'icr_signe' => $certificat && !empty($certificat->signature_icr),
+            'chauffeur_signe' => $certificat && !empty($certificat->signature_chauffeur),
+            'certificat_complet' => $certificat && !empty($certificat->signature_icr) && !empty($certificat->signature_chauffeur),
+        ]
+    ]);
+}
 
     // 4. Récupérer les certificats non signés
     public function nonSignes()
@@ -288,4 +379,91 @@ class CertificatController extends Controller
             'message' => 'Certificat supprimé avec succès'
         ]);
     }
+
+
+    // ==============================================
+// 🔹 SIGNATURES PAR MISSION (sans certificat préexistant)
+// ==============================================
+
+// Signer par ICR (crée le certificat si nécessaire)
+public function signerParIcr(Request $request)
+{
+    $request->validate([
+        'id_mission' => 'required|exists:missions,id_mission',
+        'signature_icr' => 'required|string'
+    ]);
+
+    $certificat = Certificat::where('id_mission', $request->id_mission)->first();
+    
+    if (!$certificat) {
+        // Créer le certificat avec la signature ICR seulement
+        $certificat = Certificat::create([
+            'id_mission' => $request->id_mission,
+            'date_generation' => now(),
+            'signature_icr' => $request->signature_icr,
+            'signature_chauffeur' => null  // En attente
+        ]);
+    } else {
+        $certificat->signature_icr = $request->signature_icr;
+        $certificat->save();
+    }
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Signature ICR enregistrée',
+        'certificat' => $certificat,
+        'attend_signature_chauffeur' => true
+    ]);
+}
+
+// Signer par Chauffeur (met à jour le certificat existant)
+public function signerParChauffeur(Request $request)
+{
+    $request->validate([
+        'id_mission' => 'required|exists:missions,id_mission',
+        'signature_chauffeur' => 'required|string'
+    ]);
+
+    $certificat = Certificat::where('id_mission', $request->id_mission)->first();
+    
+    if (!$certificat) {
+        return response()->json([
+            'message' => 'L\'ICR doit d\'abord signer le certificat'
+        ], 400);
+    }
+
+    // Vérifier que l'ICR a déjà signé
+    if (empty($certificat->signature_icr)) {
+        return response()->json([
+            'message' => 'L\'ICR doit signer avant le chauffeur'
+        ], 400);
+    }
+
+    // Ajouter la signature du chauffeur
+    $certificat->signature_chauffeur = $request->signature_chauffeur;
+    $certificat->save();
+
+    // Les deux signatures sont maintenant complètes
+    return response()->json([
+        'success' => true,
+        'message' => 'Certificat complètement signé !',
+        'certificat' => $certificat,
+        'completement_signe' => true
+    ]);
+}
+
+public function getStatutSignature($id_mission)
+{
+    $certificat = Certificat::where('id_mission', $id_mission)->first();
+    
+    if (!$certificat) {
+        return response()->json(['statut' => 'non_cree']);
+    }
+    
+    return response()->json([
+        'signature_icr' => !empty($certificat->signature_icr),
+        'signature_chauffeur' => !empty($certificat->signature_chauffeur),
+        'statut' => $certificat->signature_icr && $certificat->signature_chauffeur ? 'complet' : 'en_attente'
+    ]);
+}
 }

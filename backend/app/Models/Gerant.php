@@ -12,9 +12,10 @@ class Gerant extends Model
     protected $table = 'gerants';
     protected $primaryKey = 'id_gerant';
 
-    protected $fillable = [
-        'id_utilisateur'
-    ];
+  protected $fillable = [
+    'id_utilisateur',
+    'id_icr'
+];
 
     // ========== RELATIONS ==========
     

@@ -2,16 +2,14 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Notification extends Model
 {
-    use HasFactory;
-
     protected $table = 'notifications';
     protected $primaryKey = 'id_notification';
-
+    
     protected $fillable = [
         'titre',
         'message',
@@ -22,69 +20,101 @@ class Notification extends Model
 
     protected $casts = [
         'date_envoi' => 'datetime',
-        'lu' => 'boolean'
+        'lu' => 'boolean',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime'
     ];
 
-    // ========== RELATIONS ==========
-
-    public function destinataire()
+    /**
+     * Relation avec l'utilisateur destinataire
+     */
+    public function destinataire(): BelongsTo
     {
         return $this->belongsTo(User::class, 'id_destinataire', 'id_utilisateur');
     }
 
-    // ========== ACCESSOIRS ==========
-
-    public function getEstLueAttribute()
+    /**
+     * Marquer la notification comme lue
+     */
+    public function marquerCommeLue(): void
     {
-        return $this->lu;
+        $this->update(['lu' => true]);
     }
 
-    public function getDateEnvoiFormateeAttribute()
+    /**
+     * Marquer la notification comme non lue
+     */
+    public function marquerCommeNonLue(): void
     {
-        return $this->date_envoi ? $this->date_envoi->format('d/m/Y H:i') : null;
+        $this->update(['lu' => false]);
     }
 
-    // ========== MÉTHODES ==========
-
-    public function marquerCommeLue()
+    /**
+     * Vérifier si la notification est lue
+     */
+    public function estLue(): bool
     {
-        $this->lu = true;
-        $this->save();
-        return $this;
+        return (bool) $this->lu;
     }
 
-    public function marquerCommeNonLue()
-    {
-        $this->lu = false;
-        $this->save();
-        return $this;
-    }
-
-    // ========== MÉTHODES STATIQUES ==========
-
-    public static function envoyer($destinataireId, $titre, $message)
+    /**
+     * Créer une notification (méthode statique)
+     */
+    public static function envoyer(int $idDestinataire, string $titre, string $message): self
     {
         return self::create([
-            'id_destinataire' => $destinataireId,
             'titre' => $titre,
             'message' => $message,
             'date_envoi' => now(),
-            'lu' => false
+            'lu' => false,
+            'id_destinataire' => $idDestinataire
         ]);
     }
 
-    public static function getNonLues($destinataireId)
+    /**
+     * Envoyer une notification à plusieurs destinataires
+     */
+    public static function envoyerMultiple(array $idsDestinataires, string $titre, string $message): array
     {
-        return self::where('id_destinataire', $destinataireId)
+        $notifications = [];
+        foreach ($idsDestinataires as $idDestinataire) {
+            $notifications[] = self::envoyer($idDestinataire, $titre, $message);
+        }
+        return $notifications;
+    }
+
+    /**
+     * Récupérer les notifications non lues d'un utilisateur
+     */
+    public static function nonLuesPourUtilisateur(int $idUtilisateur)
+    {
+        return self::where('id_destinataire', $idUtilisateur)
             ->where('lu', false)
-            ->orderBy('created_at', 'desc')
+            ->orderBy('date_envoi', 'desc')
             ->get();
     }
 
-    public static function getToutes($destinataireId)
+    /**
+     * Scope pour les notifications non lues
+     */
+    public function scopeNonLues($query)
     {
-        return self::where('id_destinataire', $destinataireId)
-            ->orderBy('created_at', 'desc')
-            ->get();
+        return $query->where('lu', false);
+    }
+
+    /**
+     * Scope pour les notifications lues
+     */
+    public function scopeLues($query)
+    {
+        return $query->where('lu', true);
+    }
+
+    /**
+     * Scope pour les notifications récentes (derniers X jours)
+     */
+    public function scopeRecentes($query, int $jours = 7)
+    {
+        return $query->where('date_envoi', '>=', now()->subDays($jours));
     }
 }

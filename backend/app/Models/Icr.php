@@ -12,11 +12,14 @@ class Icr extends Model
     protected $table = 'icr';
     protected $primaryKey = 'id_icr';
 
-    protected $fillable = [
-        'id_utilisateur',
-        'matricule',
-        'zone'
-    ];
+    // app/Models/Icr.php
+
+protected $fillable = [
+    'id_utilisateur',
+    'matricule',
+    'zone',
+    'nom_entreprise' 
+];
 
     // ========== RELATIONS ==========
 
