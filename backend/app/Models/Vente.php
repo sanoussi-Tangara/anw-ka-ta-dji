@@ -13,30 +13,32 @@ class Vente extends Model
     protected $primaryKey = 'id_vente';
 
     protected $fillable = [
+        'id_pompiste',
+        'id_station',
         'type_carburant',
         'quantite',
-        'montant',
+        'montant',        // ← Garde montant
+        'montant_total',  // ← AJOUTE AUSSI CELUI-CI pour compatibilité
+        'mode_paiement',
+        'prix_unitaire',
         'date_vente',
-        'periode',
-        'id_pompiste',
-        'id_station'
+        'periode'
     ];
 
     protected $casts = [
         'date_vente' => 'datetime',
         'quantite' => 'decimal:2',
-        'montant' => 'decimal:2'
+        'montant' => 'decimal:2',
+        'montant_total' => 'decimal:2'
     ];
 
     // ========== RELATIONS ==========
 
-    // Pompiste qui a effectué la vente
     public function pompiste()
     {
         return $this->belongsTo(Pompiste::class, 'id_pompiste', 'id_pompiste');
     }
 
-    // Station où la vente a eu lieu
     public function station()
     {
         return $this->belongsTo(Station::class, 'id_station', 'id_station');
@@ -44,34 +46,20 @@ class Vente extends Model
 
     // ========== ACCESSOIRS ==========
 
-    // Type de carburant en texte lisible
     public function getTypeCarburantTexteAttribute()
     {
         return $this->type_carburant === 'essence' ? 'Essence' : 'Gasoil';
     }
 
-    // Prix unitaire calculé
     public function getPrixUnitaireAttribute()
     {
         if ($this->quantite > 0) {
-            return $this->montant / $this->quantite;
+            $total = $this->montant_total ?? $this->montant ?? 0;
+            return $total / $this->quantite;
         }
         return 0;
     }
 
-    // Période en texte lisible
-    public function getPeriodeTexteAttribute()
-    {
-        return match($this->periode) {
-            '6h-12h' => 'Matin (6h - 12h)',
-            '12h-18h' => 'Après-midi (12h - 18h)',
-            '18h-00h' => 'Soir (18h - 00h)',
-            '00h-6h' => 'Nuit (00h - 6h)',
-            default => $this->periode ?? 'Non définie'
-        };
-    }
-
-    // Icône du type de carburant
     public function getTypeCarburantIconeAttribute()
     {
         return $this->type_carburant === 'essence' ? '⛽' : '🛢️';
@@ -79,19 +67,20 @@ class Vente extends Model
 
     // ========== MÉTHODES ==========
 
-    // Calculer automatiquement le montant (si besoin)
     public static function calculerMontant($type_carburant, $quantite)
     {
-        $prix = $type_carburant === 'essence' ? 750 : 700;
+        // Récupérer les prix depuis le manager
+        $manager = User::where('role', 'manager')->first();
+        $prix = $type_carburant === 'essence' 
+            ? ($manager->prix_essence ?? 750) 
+            : ($manager->prix_gasoil ?? 700);
         return $quantite * $prix;
     }
 
-    // Créer une vente avec calcul automatique du montant
     public static function creerVente($id_pompiste, $id_station, $type_carburant, $quantite, $mode_paiement = null)
     {
         $montant = self::calculerMontant($type_carburant, $quantite);
         
-        // Déterminer la période
         $heure = now()->hour;
         $periode = match(true) {
             $heure >= 6 && $heure < 12 => '6h-12h',
@@ -106,12 +95,13 @@ class Vente extends Model
             'type_carburant' => $type_carburant,
             'quantite' => $quantite,
             'montant' => $montant,
+            'montant_total' => $montant,
+            'mode_paiement' => $mode_paiement,
             'date_vente' => now(),
             'periode' => $periode
         ]);
     }
 
-    // Mettre à jour le stock après vente
     public function mettreAJourStock()
     {
         $stock = Stock::where('id_station', $this->id_station)
@@ -123,14 +113,12 @@ class Vente extends Model
             $stock->date_mise_a_jour = now();
             $stock->save();
             
-            // Vérifier l'alerte stock faible
-            if ($stock->quantite <= $stock->seuil_alerte) {
+            if ($stock->quantite <= ($stock->seuil_alerte ?? 5000)) {
                 $this->declencherAlerteStockFaible($stock->quantite);
             }
         }
     }
 
-    // Déclencher une alerte de stock faible
     private function declencherAlerteStockFaible($quantiteRestante)
     {
         $station = $this->station;
@@ -145,11 +133,5 @@ class Vente extends Model
                 'id_destinataire' => $gerant->user->id_utilisateur
             ]);
         }
-    }
-
-    // Vérifier si la vente est dans une période spécifique
-    public function estDansPeriode($periode)
-    {
-        return $this->periode === $periode;
     }
 }

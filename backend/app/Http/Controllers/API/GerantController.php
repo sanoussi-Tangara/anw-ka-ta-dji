@@ -11,6 +11,7 @@ use App\Models\Livraison;
 use App\Models\Alerte;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\DB;
 
 class GerantController extends Controller
 {
@@ -26,29 +27,40 @@ class GerantController extends Controller
             'nom' => 'required|string|max:100',
             'prenom' => 'required|string|max:100',
             'email' => 'required|email|unique:users,email',
-            'telephone' => 'required|string|unique:users,telephone'
+            'telephone' => 'required|string|unique:users,telephone',
+            'password' => 'nullable|string|min:6'
         ]);
 
-        // Créer l'utilisateur
-        $user = User::create([
-            'nom' => $request->nom,
-            'prenom' => $request->prenom,
-            'email' => $request->email,
-            'password' => Hash::make($request->password ?? 'default123'),
-            'telephone' => $request->telephone,
-            'role' => 'pompiste'
-        ]);
+        DB::beginTransaction();
+        try {
+            // Créer l'utilisateur
+            $user = User::create([
+                'nom' => $request->nom,
+                'prenom' => $request->prenom,
+                'email' => $request->email,
+                'password' => Hash::make($request->password ?? 'default123'),
+                'telephone' => $request->telephone,
+                'role' => 'pompiste',
+                'statut' => true
+            ]);
 
-        // Créer le pompiste
-        $pompiste = Pompiste::create([
-            'id_utilisateur' => $user->id_utilisateur,
-            'id_gerant' => $request->id_gerant
-        ]);
+            // Créer le pompiste
+            $pompiste = Pompiste::create([
+                'id_utilisateur' => $user->id_utilisateur,
+                'id_gerant' => $request->id_gerant,
+                'id_station' => $request->id_station ?? null
+            ]);
 
-        return response()->json([
-            'message' => 'Pompiste créé avec succès',
-            'pompiste' => $pompiste->load('user')
-        ], 201);
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Pompiste créé avec succès',
+                'pompiste' => $pompiste->load('user')
+            ], 201);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Erreur: ' . $e->getMessage()], 500);
+        }
     }
 
     // 2. Modifier un pompiste
@@ -113,32 +125,38 @@ class GerantController extends Controller
         ]);
     }
 
-    // ==============================================
-    // 🔹 GESTION DES STOCKS
-    // ==============================================
-
     // 6. Voir le stock de la station
     public function voirStock($id_gerant)
     {
-        $gerant = Gerant::with('station.stocks')->findOrFail($id_gerant);
+        $gerant = Gerant::with('station')->findOrFail($id_gerant);
         
         if (!$gerant->station) {
-            return response()->json(['message' => 'Aucune station associée'], 404);
+            return response()->json([
+                'message' => 'Aucune station associée',
+                'stocks' => []
+            ]);
         }
 
+        $stocks = Stock::where('id_station', $gerant->station->id_station)->get();
+
         return response()->json([
-            'station' => $gerant->station->nom,
-            'stocks' => $gerant->station->stocks
+            'station' => [
+                'id' => $gerant->station->id_station,
+                'nom' => $gerant->station->nom,
+                'adresse' => $gerant->station->adresse
+            ],
+            'stocks' => $stocks
         ]);
     }
 
-    // 7. Recevoir une alerte stock faible
+    // 7. Alertes stock faible
     public function alertesStock($id_gerant)
     {
         $gerant = Gerant::findOrFail($id_gerant);
         
         $alertes = Alerte::where('id_destinataire', $gerant->id_utilisateur)
             ->where('type', 'stock_faible')
+            ->where('statut', 'non_lue')
             ->orderBy('created_at', 'desc')
             ->get();
 
@@ -147,21 +165,36 @@ class GerantController extends Controller
         ]);
     }
 
-    // ==============================================
-    // 🔹 GESTION DES LIVRAISONS
-    // ==============================================
-
-    // 8. Valider la réception d'une livraison
-    public function validerReception(Request $request)
+    // 8. Livraisons en attente - CORRIGÉ avec 'mission'
+    public function livraisonsEnAttente($id_gerant)
     {
-        $request->validate([
-            'id_livraison' => 'required|exists:livraisons,id_livraison',
-            'id_gerant' => 'required|exists:gerants,id_gerant',
-            'code_validation' => 'required|string|size:4',
-            'quantite_recue' => 'required|numeric|min:0',
-            'photo_compteur' => 'nullable|string' // URL ou base64
-        ]);
+        $gerant = Gerant::findOrFail($id_gerant);
+        
+        $livraisons = Livraison::where('id_gerant', $id_gerant)
+            ->where('statut', 'en_attente')
+            ->with(['station', 'mission.chauffeur.user', 'mission.camion'])
+            ->orderBy('created_at', 'asc')
+            ->get();
 
+        return response()->json([
+            'livraisons' => $livraisons
+        ]);
+    }
+
+    // 9. Valider la réception d'une livraison - CORRIGÉ avec 'mission'
+   public function validerReception(Request $request)
+{
+    $request->validate([
+        'id_livraison' => 'required|exists:livraisons,id_livraison',
+        'id_gerant' => 'required|exists:gerants,id_gerant',
+        'code_validation' => 'required|string|size:4',
+        'quantite_recue' => 'required|numeric|min:0',
+        'photo_compteur' => 'nullable|string',
+        'signature' => 'nullable|string'
+    ]);
+
+    DB::beginTransaction();
+    try {
         $livraison = Livraison::findOrFail($request->id_livraison);
         
         // Vérifier le code
@@ -174,43 +207,73 @@ class GerantController extends Controller
             return response()->json(['message' => 'Livraison non autorisée'], 403);
         }
 
+        // Vérifier que la livraison n'est pas déjà validée
+        if ($livraison->statut !== 'en_attente') {
+            return response()->json(['message' => 'Livraison déjà traitée'], 400);
+        }
+
+        // Récupérer la mission associée
+        $mission = $livraison->mission;
+        
         // Enregistrer la réception
         $livraison->quantite_livree = $request->quantite_recue;
         $livraison->date_livraison = now();
-        $livraison->statut = $request->quantite_recue === $livraison->quantite_prevue ? 'validee' : 'ecart';
+        $livraison->statut = $request->quantite_recue == $livraison->quantite_prevue ? 'validee' : 'ecart';
         
         if ($request->has('photo_compteur')) {
             $livraison->photo_compteur = $request->photo_compteur;
         }
         
+        if ($request->has('signature')) {
+            $livraison->signature_gerant = $request->signature;
+        }
+        
         $livraison->save();
 
-        // Mettre à jour le stock
+        // Mettre à jour le stock de la STATION
+        $typeCarburant = $mission && $mission->bon ? $mission->bon->type_carburant : 'essence';
         $stock = Stock::where('id_station', $livraison->id_station)
-            ->where('type_carburant', $livraison->type_carburant)
+            ->where('type_carburant', $typeCarburant)
             ->first();
             
         if ($stock) {
             $stock->quantite += $request->quantite_recue;
             $stock->date_mise_a_jour = now();
             $stock->save();
+        } else {
+            // Créer le stock si inexistant
+            Stock::create([
+                'id_station' => $livraison->id_station,
+                'type_carburant' => $typeCarburant,
+                'quantite' => $request->quantite_recue,
+                'seuil_alerte' => 5000,
+                'date_mise_a_jour' => now()
+            ]);
         }
 
-        // Signer électroniquement (à implémenter avec signature numérique)
-        // $livraison->signature_gerant = $request->signature;
+        // ✅ AJOUTER CETTE LIGNE - Vérifier les alertes de stock après la mise à jour
+        $this->verifierAlertesStock($request->id_gerant);
+
+        DB::commit();
 
         return response()->json([
             'message' => 'Livraison validée avec succès',
-            'livraison' => $livraison
+            'livraison' => $livraison,
+            'stock' => $stock
         ]);
+    } catch (\Exception $e) {
+        DB::rollBack();
+        return response()->json(['message' => 'Erreur: ' . $e->getMessage()], 500);
     }
+}
 
-    // 9. Historique des livraisons
+    // 10. Historique des livraisons
     public function historiqueLivraisons($id_gerant)
     {
         $gerant = Gerant::findOrFail($id_gerant);
         
         $livraisons = Livraison::where('id_gerant', $id_gerant)
+            ->whereIn('statut', ['validee', 'ecart'])
             ->with('station')
             ->orderBy('created_at', 'desc')
             ->get();
@@ -220,36 +283,31 @@ class GerantController extends Controller
         ]);
     }
 
-    // ==============================================
-    // 🔹 CONSULTATION
-    // ==============================================
-
-    // 10. Voir les ventes des pompistes
+    // 11. Voir les ventes
     public function voirVentes($id_gerant)
     {
-        $gerant = Gerant::with(['pompistes.ventes.station'])->findOrFail($id_gerant);
+        $gerant = Gerant::with(['station'])->findOrFail($id_gerant);
         
-        $ventes = [];
-        foreach ($gerant->pompistes as $pompiste) {
-            $ventes[] = [
-                'pompiste' => $pompiste->user->nom_complet ?? $pompiste->id_pompiste,
-                'ventes' => $pompiste->ventes
-            ];
-        }
+        // Récupérer les ventes via la station
+        $ventes = \App\Models\Vente::where('id_station', $gerant->station->id_station)
+            ->with('pompiste.user')
+            ->orderBy('date_vente', 'desc')
+            ->get();
 
         return response()->json([
-            'ventes' => $ventes
+            'ventes' => $ventes,
+            'total' => $ventes->sum('montant')
         ]);
     }
 
-    // 11. Dashboard du gérant (résumé)
+    // 12. Dashboard du gérant
     public function dashboard($id_gerant)
     {
         $gerant = Gerant::with('station.stocks')->findOrFail($id_gerant);
         
         $nombrePompistes = $gerant->pompistes()->count();
         
-        $ventesTotal = $gerant->ventes()->sum('montant');
+        $ventesTotal = \App\Models\Vente::where('id_station', $gerant->station->id_station)->sum('montant');
         
         $livraisonsEnAttente = Livraison::where('id_gerant', $id_gerant)
             ->where('statut', 'en_attente')
@@ -262,7 +320,7 @@ class GerantController extends Controller
         return response()->json([
             'gerant' => [
                 'id' => $gerant->id_gerant,
-                'nom' => $gerant->nom,
+                'nom' => $gerant->user->prenom . ' ' . $gerant->user->nom,
                 'station' => $gerant->station?->nom
             ],
             'statistiques' => [
@@ -275,11 +333,7 @@ class GerantController extends Controller
         ]);
     }
 
-    // ==============================================
-    // 🔹 PROFIL
-    // ==============================================
-
-    // 12. Voir le profil du gérant
+    // 13. Voir le profil du gérant
     public function profil($id_gerant)
     {
         $gerant = Gerant::with(['user', 'station'])->findOrFail($id_gerant);
@@ -289,7 +343,7 @@ class GerantController extends Controller
         ]);
     }
 
-    // 13. Modifier le profil
+    // 14. Modifier le profil
     public function updateProfil(Request $request, $id_gerant)
     {
         $gerant = Gerant::findOrFail($id_gerant);
@@ -309,6 +363,95 @@ class GerantController extends Controller
         return response()->json([
             'message' => 'Profil mis à jour',
             'gerant' => $gerant->fresh('user')
+        ]);
+    }
+
+    // 15. Marquer une alerte comme lue
+    public function marquerAlerteLue($id_alerte)
+    {
+        $alerte = Alerte::findOrFail($id_alerte);
+        $alerte->statut = 'lue';
+        $alerte->save();
+
+        return response()->json([
+            'message' => 'Alerte marquée comme lue'
+        ]);
+    }
+
+    // 16. Mettre à jour le seuil d'alerte d'un stock
+public function updateSeuilAlerte(Request $request, $id_gerant)
+{
+    $request->validate([
+        'type_carburant' => 'required|in:essence,gasoil',
+        'seuil_alerte' => 'required|numeric|min:0|max:50000'
+    ]);
+
+    $gerant = Gerant::with('station')->findOrFail($id_gerant);
+    
+    if (!$gerant->station) {
+        return response()->json(['message' => 'Aucune station associée'], 404);
+    }
+
+    $stock = Stock::where('id_station', $gerant->station->id_station)
+        ->where('type_carburant', $request->type_carburant)
+        ->first();
+
+    if (!$stock) {
+        return response()->json(['message' => 'Stock non trouvé pour ce type de carburant'], 404);
+    }
+
+    $stock->seuil_alerte = $request->seuil_alerte;
+    $stock->save();
+
+    return response()->json([
+        'message' => 'Seuil d\'alerte mis à jour avec succès',
+        'stock' => $stock
+    ]);
+}
+
+
+    // 17. Vérifier les stocks et créer des alertes si nécessaire
+    public function verifierAlertesStock($id_gerant)
+    {
+        $gerant = Gerant::with('station')->findOrFail($id_gerant);
+        
+        if (!$gerant->station) {
+            return response()->json([
+                'message' => 'Aucune station associée',
+                'alertes_creees' => []
+            ]);
+        }
+        
+        $stocks = Stock::where('id_station', $gerant->station->id_station)->get();
+        $alertesCreees = [];
+        
+        foreach ($stocks as $stock) {
+            if ($stock->quantite <= $stock->seuil_alerte) {
+                // Vérifier si une alerte non lue existe déjà pour ce type de carburant
+                $alerteExistante = Alerte::where('id_destinataire', $gerant->id_utilisateur)
+                    ->where('type', 'stock_faible')
+                    ->where('statut', 'non_lue')
+                    ->where('message', 'LIKE', '%' . $stock->type_carburant . '%')
+                    ->first();
+                
+                if (!$alerteExistante) {
+                    // Créer une nouvelle alerte
+                    $alerte = Alerte::create([
+                        'type' => 'stock_faible',
+                        'message' => "⚠️ Stock faible : {$stock->type_carburant} - " . round($stock->quantite) . " L restants (seuil: {$stock->seuil_alerte} L)",
+                        'date_creation' => now(),
+                        'statut' => 'non_lue',
+                        'id_destinataire' => $gerant->id_utilisateur,
+                        'id_gerant' => $id_gerant
+                    ]);
+                    $alertesCreees[] = $alerte;
+                }
+            }
+        }
+        
+        return response()->json([
+            'alertes_creees' => $alertesCreees,
+            'message' => count($alertesCreees) . ' alerte(s) créée(s)'
         ]);
     }
 }

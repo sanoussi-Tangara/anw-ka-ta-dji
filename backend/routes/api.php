@@ -13,6 +13,12 @@ use App\Http\Controllers\API\IcrController;
 use App\Http\Controllers\API\CertificatController;  
 use App\Http\Controllers\API\MissionController;
 use App\Http\Controllers\API\ChauffeurController;
+use App\Http\Controllers\API\GerantController;
+use App\Http\Controllers\API\PompisteController;
+use App\Http\Controllers\API\ConsommateurController;
+use App\Http\Controllers\API\AdministrateurController;
+use App\Http\Controllers\API\ReservationController;
+use App\Http\Controllers\API\PaiementController;
 
 Route::get('/user', function (Request $request) {
     return $request->user();
@@ -354,4 +360,127 @@ Route::middleware(['auth:sanctum', 'role:chauffeur'])->prefix('chauffeur')->grou
     
     // Incidents
     Route::post('/incident/signaler', [ChauffeurController::class, 'signalerIncident']);
+});
+
+
+// ========== GÉRANT DE STATION ==========
+Route::middleware(['auth:sanctum', 'role:gerant'])->prefix('gerant')->group(function () {
+    
+    // Profil
+    Route::get('/profil/{id_gerant}', [GerantController::class, 'profil']);
+    Route::put('/profil/{id_gerant}', [GerantController::class, 'updateProfil']);
+    
+    // Dashboard
+    Route::get('/dashboard/{id_gerant}', [GerantController::class, 'dashboard']);
+    
+    // Pompistes
+    Route::get('/pompistes/{id_gerant}', [GerantController::class, 'voirPompistes']);
+    Route::post('/pompiste/creer', [GerantController::class, 'creerPompiste']);
+    Route::put('/pompiste/modifier/{id_pompiste}', [GerantController::class, 'modifierPompiste']);
+    Route::put('/pompiste/desactiver/{id_pompiste}', [GerantController::class, 'desactiverPompiste']);
+    Route::put('/pompiste/activer/{id_pompiste}', [GerantController::class, 'activerPompiste']);
+    
+    // Stocks (station)
+    Route::get('/stocks/{id_gerant}', [GerantController::class, 'voirStock']);
+    
+    // Livraisons
+    Route::get('/livraisons/attente/{id_gerant}', [GerantController::class, 'livraisonsEnAttente']);
+    Route::get('/livraisons/historique/{id_gerant}', [GerantController::class, 'historiqueLivraisons']);
+    Route::post('/livraison/valider', [GerantController::class, 'validerReception']);
+    
+    // Ventes
+    Route::get('/ventes/{id_gerant}', [GerantController::class, 'voirVentes']);
+    
+    // Alertes
+    Route::get('/alertes/{id_gerant}', [GerantController::class, 'alertesStock']);
+    Route::put('/alerte/lire/{id_alerte}', [GerantController::class, 'marquerAlerteLue']);
+    Route::get('/alertes/verifier/{id_gerant}', [GerantController::class, 'verifierAlertesStock']);
+
+     Route::get('/notifications', [NotificationController::class, 'index']);
+    Route::get('/notifications/non-lues', [NotificationController::class, 'nonLues']);
+    Route::put('/notification/lire/{id}', [NotificationController::class, 'marquerLue']);
+    Route::put('/notifications/lire-toutes', [NotificationController::class, 'marquerToutesLues']);
+    Route::delete('/notification/{id}', [NotificationController::class, 'destroy']);
+    Route::delete('/notifications/supprimer/toutes', [NotificationController::class, 'deleteAll']);
+//stock
+    Route::get('/stocks/{id_gerant}', [GerantController::class, 'voirStock']);
+    Route::put('/stocks/{id_gerant}/seuil', [GerantController::class, 'updateSeuilAlerte']); // ← AJOUTE CETTE LIGNE
+});
+
+// ========== POMPISTE ==========
+Route::middleware(['auth:sanctum', 'role:pompiste'])->prefix('pompiste')->group(function () {
+    
+    // Profil
+    Route::get('/profil', [PompisteController::class, 'profil']);
+    Route::put('/profil', [PompisteController::class, 'updateProfil']);
+    
+    // Ventes
+    Route::post('/vente', [PompisteController::class, 'saisirVente']);
+    Route::get('/ventes', [PompisteController::class, 'historiqueVentes']);
+    Route::get('/ventes/jour', [PompisteController::class, 'ventesDuJour']);
+    Route::get('/prix', [PompisteController::class, 'getPrixActuels']);
+    
+    // Stocks (consultation)
+    Route::get('/stocks', [PompisteController::class, 'voirStock']);
+    
+    // Réservations
+    Route::get('/reservations', [PompisteController::class, 'voirReservations']);
+    Route::put('/reservation/{id}/servir', [PompisteController::class, 'marquerServie']);
+    
+    // Fin de journée
+    Route::get('/cloture', [PompisteController::class, 'clotureCaisse']);
+    
+    // Synchronisation hors-ligne
+    Route::post('/synchroniser', [PompisteController::class, 'synchroniserVentes']);
+    Route::get('/reservations', [ReservationController::class, 'getReservationsPompiste']);
+    Route::put('/reservation/{id}/servir', [ReservationController::class, 'servirReservation']);
+});
+
+// ==============================================
+// 🔹 ROUTES POUR CONSOMMATEUR
+// ==============================================
+
+Route::middleware(['auth:sanctum', 'role:consommateur'])->group(function () {
+    
+    // ========== PROFIL ==========
+    Route::get('/consommateur/profil', [ConsommateurController::class, 'profil']);
+    Route::put('/consommateur/profil', [ConsommateurController::class, 'updateProfil']);
+    
+    // ========== RÉSERVATIONS ==========
+    Route::get('/reservations', [ReservationController::class, 'index']);
+    Route::post('/reservations', [ReservationController::class, 'store']);
+    Route::get('/reservation/{id}', [ReservationController::class, 'show']);
+    Route::put('/reservation/{id}/annuler', [ReservationController::class, 'annuler']);
+    // Paiement d'une réservation
+Route::post('/reservation/payer', [ReservationController::class, 'payer']);
+    
+    // ========== PAIEMENTS ==========
+    Route::post('/paiements/simuler', [PaiementController::class, 'simuler']);
+    Route::get('/paiements/verifier/{id_reservation}', [PaiementController::class, 'verifier']);
+    
+    // ========== STATISTIQUES ==========
+    Route::get('/consommateur/statistiques', [ReservationController::class, 'statistiques']);
+    
+    // ========== NOTIFICATIONS ==========
+    Route::get('/notifications', [NotificationController::class, 'index']);
+    Route::put('/notifications/{id}/lire', [NotificationController::class, 'marquerLue']);
+});
+
+// ==============================================
+// 🔹 ROUTES PUBLIQUES POUR LE CONSOMMATEUR
+// ==============================================
+
+// Stations (consultation sans authentification)
+Route::get('/stations', [StationController::class, 'index']);
+Route::get('/stations/{id_station}', [StationController::class, 'show']);
+Route::get('/stations/disponibles/{type_carburant}', [StationController::class, 'disponibles']);
+Route::post('/stations/proximite', [StationController::class, 'aProximite']);
+
+// Prix actuels (public)
+Route::get('/prix-actuels', function() {
+    $manager = App\Models\User::where('role', 'manager')->first();
+    return response()->json([
+        'essence' => $manager->prix_essence ?? 750,
+        'gasoil' => $manager->prix_gasoil ?? 700
+    ]);
 });

@@ -210,4 +210,24 @@ class NotificationController extends Controller
 
         return response()->json($stats);
     }
+
+    // Ajoute cette méthode à la fin du fichier
+/**
+ * Notifier un gérant qu'une livraison est en attente
+ */
+public static function notifierGerant($id_gerant, $titre, $message, $lien = null)
+{
+    $gerant = Gerant::find($id_gerant);
+    if (!$gerant) return null;
+    
+    return Notification::create([
+        'type' => 'livraison',
+        'titre' => $titre,
+        'message' => $message,
+        'id_destinataire' => $gerant->id_utilisateur,
+        'lu' => false,
+        'lien' => $lien ?? '/gerant/livraisons',
+        'created_at' => now()
+    ]);
+}
 }

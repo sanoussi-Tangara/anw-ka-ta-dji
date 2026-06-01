@@ -8,6 +8,7 @@ use App\Models\Pompiste;
 use App\Models\Station;
 use App\Models\Stock;
 use App\Models\Alerte;
+use App\Models\User;  // ← AJOUTE CETTE LIGNE
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -178,44 +179,73 @@ class VenteController extends Controller
     // ==============================================
 
     // 9. Créer une vente
-    public function store(Request $request)
-    {
-        $request->validate([
-            'id_pompiste' => 'required|exists:pompistes,id_pompiste',
-            'id_station' => 'required|exists:stations,id_station',
-            'type_carburant' => 'required|in:essence,gasoil',
-            'quantite' => 'required|numeric|min:0.1'
-        ]);
+  public function store(Request $request)
+{
+    $request->validate([
+        'id_pompiste' => 'required|exists:pompistes,id_pompiste',
+        'id_station' => 'required|exists:stations,id_station',
+        'type_carburant' => 'required|in:essence,gasoil',
+        'quantite' => 'required|numeric|min:0.1',
+        'mode_paiement' => 'required|in:especes,orange_money,mobicash,wave'
+    ]);
 
-        // Vérifier le stock
-        $stock = Stock::where('id_station', $request->id_station)
-            ->where('type_carburant', $request->type_carburant)
-            ->first();
+    // Vérifier le stock
+    $stock = Stock::where('id_station', $request->id_station)
+        ->where('type_carburant', $request->type_carburant)
+        ->first();
 
-        if (!$stock || $stock->quantite < $request->quantite) {
-            return response()->json([
-                'message' => 'Stock insuffisant',
-                'stock_disponible' => $stock ? $stock->quantite : 0
-            ], 400);
-        }
-
-        // Créer la vente
-        $vente = Vente::creerVente(
-            $request->id_pompiste,
-            $request->id_station,
-            $request->type_carburant,
-            $request->quantite
-        );
-
-        // Mettre à jour le stock
-        $vente->mettreAJourStock();
-
+    if (!$stock || $stock->quantite < $request->quantite) {
         return response()->json([
-            'message' => 'Vente enregistrée avec succès',
-            'vente' => $vente->load(['pompiste.user', 'station'])
-        ], 201);
+            'message' => 'Stock insuffisant',
+            'stock_disponible' => $stock ? $stock->quantite : 0
+        ], 400);
     }
 
+    // Récupérer les prix du manager
+    $manager = User::where('role', 'manager')->first();
+    $prixUnitaire = $request->type_carburant === 'essence' 
+        ? ($manager->prix_essence ?? 750) 
+        : ($manager->prix_gasoil ?? 700);
+    $montant = $request->quantite * $prixUnitaire;
+
+    // Déterminer la période
+    $heure = now()->hour;
+    $periode = match(true) {
+        $heure >= 6 && $heure < 12 => '6h-12h',
+        $heure >= 12 && $heure < 18 => '12h-18h',
+        $heure >= 18 && $heure < 24 => '18h-00h',
+        default => '00h-6h'
+    };
+
+    // Créer la vente avec TOUS les champs
+    $vente = Vente::create([
+        'id_pompiste' => $request->id_pompiste,
+        'id_station' => $request->id_station,
+        'type_carburant' => $request->type_carburant,
+        'quantite' => $request->quantite,
+        'montant' => $montant,              // ← AJOUTE CETTE LIGNE
+        'montant_total' => $montant,
+        'mode_paiement' => $request->mode_paiement,
+        'prix_unitaire' => $prixUnitaire,
+        'date_vente' => now(),
+        'periode' => $periode
+    ]);
+
+    // Mettre à jour le stock
+    $stock->quantite -= $request->quantite;
+    $stock->date_mise_a_jour = now();
+    $stock->save();
+
+    // Vérifier alerte stock faible
+    if ($stock->quantite <= ($stock->seuil_alerte ?? 5000)) {
+        $this->declencherAlerteStock($stock, $vente);
+    }
+
+    return response()->json([
+        'message' => 'Vente enregistrée avec succès',
+        'vente' => $vente->load(['pompiste.user', 'station'])
+    ], 201);
+}
     // 10. Créer une vente avec mode de paiement
     public function storeWithPayment(Request $request)
     {

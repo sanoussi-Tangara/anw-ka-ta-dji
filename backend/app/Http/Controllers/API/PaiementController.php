@@ -5,16 +5,158 @@ namespace App\Http\Controllers\API;
 use App\Http\Controllers\Controller;
 use App\Models\Paiement;
 use App\Models\Reservation;
-use App\Models\Consommateur;
+use App\Models\Stock;
+use App\Models\Vente;
+use App\Models\Notification;
+use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class PaiementController extends Controller
 {
-    // ==============================================
-    // 🔹 RÉCUPÉRATION DES PAIEMENTS
-    // ==============================================
+    /**
+     * Simuler un paiement (Orange Money, Mobicash, Wave, Carte, Espèces)
+     */
+    public function simuler(Request $request)
+    {
+        $request->validate([
+            'id_reservation' => 'required|exists:reservations,id_reservation',
+            'mode_paiement' => 'required|in:orange_money,mobicash,wave,card,especes'
+        ]);
 
-    // 1. Lister tous les paiements
+        $reservation = Reservation::with('station')->findOrFail($request->id_reservation);
+        $user = auth()->user();
+
+        // Vérifier que la réservation appartient au consommateur
+        if ($reservation->id_consommateur !== $user->consommateur->id_consommateur) {
+            return response()->json(['message' => 'Non autorisé'], 403);
+        }
+
+        // Vérifier que la réservation n'est pas déjà payée
+        if ($reservation->statut !== 'en_attente') {
+            return response()->json(['message' => 'Réservation déjà traitée'], 400);
+        }
+
+        // Vérifier et recalculer le montant si nécessaire
+        if (!$reservation->montant_total || $reservation->montant_total <= 0) {
+            $manager = User::where('role', 'manager')->first();
+            $prix = $reservation->type_carburant === 'essence' 
+                ? ($manager->prix_essence ?? 750) 
+                : ($manager->prix_gasoil ?? 700);
+            $reservation->montant_total = $reservation->quantite * $prix;
+            $reservation->save();
+        }
+
+        // Simulation (95% succès)
+        $success = rand(1, 100) <= 95;
+
+        if (!$success) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Paiement échoué. Veuillez réessayer.'
+            ], 400);
+        }
+
+        DB::beginTransaction();
+
+        try {
+            // Générer référence de transaction
+            $reference = $this->genererReference($request->mode_paiement);
+
+            // CRÉER LE PAIEMENT
+            $paiement = Paiement::create([
+                'id_reservation' => $reservation->id_reservation,
+                'montant' => $reservation->montant_total,
+                'mode_paiement' => $request->mode_paiement,
+                'date_paiement' => now(),
+                'statut' => 'paye',
+                'reference_transaction' => $reference
+            ]);
+
+            // Mettre à jour la réservation
+            $reservation->statut = 'payee';
+            $reservation->save();
+
+            // DIMINUER LE STOCK
+            $stock = Stock::where('id_station', $reservation->id_station)
+                ->where('type_carburant', $reservation->type_carburant)
+                ->first();
+
+            if ($stock) {
+                $stock->quantite -= $reservation->quantite;
+                $stock->save();
+            }
+
+            // ✅ CRÉER UNE VENTE AUTOMATIQUEMENT
+           // CRÉER UNE VENTE AUTOMATIQUEMENT (sans id_pompiste)
+// CRÉER UNE VENTE AUTOMATIQUEMENT
+$vente = Vente::create([
+    'id_station' => $reservation->id_station,
+    'id_pompiste' => auth()->id(), // Ou l'ID du pompiste connecté
+    'type_carburant' => $reservation->type_carburant,
+    'quantite' => $reservation->quantite,
+    'montant' => $reservation->montant_total,
+    'montant_total' => $reservation->montant_total,
+    'mode_paiement' => $request->mode_paiement,
+    'prix_unitaire' => $reservation->montant_total / $reservation->quantite,
+    'date_vente' => now(),
+    'periode' => $this->getPeriode()
+]);
+
+            // NOTIFICATION AU CONSOMMATEUR
+            $station = $reservation->station;
+            Notification::create([
+                'type' => 'paiement',
+                'titre' => '✅ Paiement accepté',
+                'message' => "Votre paiement de {$paiement->montant} FCFA a été accepté. Rendez-vous à la station {$station->nom}.",
+                'id_destinataire' => $user->id_utilisateur,
+                'date_envoi' => now(),
+                'lu' => false
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Paiement effectué avec succès',
+                'paiement' => $paiement,
+                'reservation' => $reservation,
+                'vente' => $vente,
+                'transaction_id' => $reference
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Erreur: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Vérifier le statut d'un paiement
+     */
+    public function verifier($id_reservation)
+    {
+        $paiement = Paiement::where('id_reservation', $id_reservation)->first();
+        
+        if (!$paiement) {
+            return response()->json([
+                'paye' => false,
+                'message' => 'Aucun paiement trouvé'
+            ]);
+        }
+
+        return response()->json([
+            'paye' => $paiement->statut === 'paye',
+            'montant' => $paiement->montant,
+            'mode_paiement' => $paiement->mode_paiement,
+            'date_paiement' => $paiement->date_paiement,
+            'reference' => $paiement->reference_transaction
+        ]);
+    }
+
+    /**
+     * Lister tous les paiements (admin)
+     */
     public function index()
     {
         $paiements = Paiement::with(['reservation.consommateur.user', 'reservation.station'])
@@ -27,277 +169,52 @@ class PaiementController extends Controller
         ]);
     }
 
-    // 2. Voir le détail d'un paiement
+    /**
+     * Voir le détail d'un paiement
+     */
     public function show($id_paiement)
     {
-        $paiement = Paiement::with([
-            'reservation.consommateur.user',
-            'reservation.station'
-        ])->findOrFail($id_paiement);
+        $paiement = Paiement::with(['reservation.consommateur.user', 'reservation.station'])
+            ->findOrFail($id_paiement);
 
-        return response()->json([
-            'paiement' => $paiement
-        ]);
+        return response()->json(['paiement' => $paiement]);
     }
 
-    // 3. Paiements par réservation
+    /**
+     * Paiements par réservation
+     */
     public function getByReservation($id_reservation)
     {
-        $reservation = Reservation::findOrFail($id_reservation);
-        
         $paiements = Paiement::where('id_reservation', $id_reservation)
             ->orderBy('created_at', 'desc')
             ->get();
 
         return response()->json([
-            'reservation' => $reservation->id_reservation,
+            'reservation_id' => $id_reservation,
             'paiements' => $paiements,
             'count' => $paiements->count()
         ]);
     }
 
-    // 4. Paiements par consommateur
+    /**
+     * Paiements par consommateur
+     */
     public function getByConsommateur($id_consommateur)
     {
-        $consommateur = Consommateur::findOrFail($id_consommateur);
-        
         $paiements = Paiement::whereHas('reservation', function($q) use ($id_consommateur) {
             $q->where('id_consommateur', $id_consommateur);
         })->with(['reservation.station'])->orderBy('created_at', 'desc')->get();
 
         return response()->json([
-            'consommateur' => $consommateur->user->nom_complet ?? $id_consommateur,
             'paiements' => $paiements,
             'count' => $paiements->count(),
             'total_depense' => $paiements->sum('montant')
         ]);
     }
 
-    // 5. Paiements par mode de paiement
-    public function getByMode($mode)
-    {
-        if (!in_array($mode, ['orange_money', 'mobicash', 'wave', 'carte'])) {
-            return response()->json(['message' => 'Mode de paiement invalide'], 400);
-        }
-
-        $paiements = Paiement::where('mode_paiement', $mode)
-            ->with(['reservation.consommateur.user', 'reservation.station'])
-            ->orderBy('created_at', 'desc')
-            ->get();
-
-        return response()->json([
-            'mode_paiement' => $mode,
-            'paiements' => $paiements,
-            'count' => $paiements->count(),
-            'montant_total' => $paiements->sum('montant')
-        ]);
-    }
-
-    // 6. Paiements par statut
-    public function getByStatut($statut)
-    {
-        if (!in_array($statut, ['en_attente', 'paye', 'echoue'])) {
-            return response()->json(['message' => 'Statut invalide'], 400);
-        }
-
-        $paiements = Paiement::where('statut', $statut)
-            ->with(['reservation.consommateur.user', 'reservation.station'])
-            ->orderBy('created_at', 'desc')
-            ->get();
-
-        return response()->json([
-            'statut' => $statut,
-            'paiements' => $paiements,
-            'count' => $paiements->count()
-        ]);
-    }
-
-    // 7. Paiements par date
-    public function getByDate(Request $request)
-    {
-        $request->validate([
-            'date_debut' => 'required|date',
-            'date_fin' => 'nullable|date|after_or_equal:date_debut'
-        ]);
-
-        $query = Paiement::whereDate('date_paiement', '>=', $request->date_debut);
-        
-        if ($request->has('date_fin')) {
-            $query->whereDate('date_paiement', '<=', $request->date_fin);
-        } else {
-            $query->whereDate('date_paiement', '<=', $request->date_debut);
-        }
-
-        $paiements = $query->with(['reservation.consommateur.user', 'reservation.station'])
-            ->orderBy('date_paiement', 'desc')
-            ->get();
-
-        return response()->json([
-            'periode' => [
-                'debut' => $request->date_debut,
-                'fin' => $request->date_fin ?? $request->date_debut
-            ],
-            'paiements' => $paiements,
-            'count' => $paiements->count(),
-            'montant_total' => $paiements->sum('montant')
-        ]);
-    }
-
-    // ==============================================
-    // 🔹 CRÉATION ET GESTION DES PAIEMENTS
-    // ==============================================
-
-    // 8. Créer un paiement pour une réservation
-    public function store(Request $request)
-    {
-        $request->validate([
-            'id_reservation' => 'required|exists:reservations,id_reservation',
-            'mode_paiement' => 'required|in:orange_money,mobicash,wave,carte',
-            'reference_transaction' => 'nullable|string|max:100'
-        ]);
-
-        $reservation = Reservation::findOrFail($request->id_reservation);
-
-        // Vérifier que la réservation n'a pas déjà un paiement
-        if ($reservation->paiement) {
-            return response()->json([
-                'message' => 'Cette réservation a déjà un paiement'
-            ], 400);
-        }
-
-        // Vérifier que la réservation peut être payée
-        if ($reservation->statut !== 'en_attente') {
-            return response()->json([
-                'message' => 'Cette réservation ne peut pas être payée'
-            ], 400);
-        }
-
-        $paiement = Paiement::create([
-            'id_reservation' => $request->id_reservation,
-            'montant' => $reservation->montant,
-            'mode_paiement' => $request->mode_paiement,
-            'date_paiement' => now(),
-            'statut' => 'paye',
-            'reference_transaction' => $request->reference_transaction ?? 'TRX_' . time() . '_' . uniqid()
-        ]);
-
-        // Mettre à jour le statut de la réservation
-        $reservation->confirmerPaiement();
-
-        return response()->json([
-            'message' => 'Paiement effectué avec succès',
-            'paiement' => $paiement->load('reservation'),
-            'code_retrait' => $reservation->code_retrait
-        ], 201);
-    }
-
-    // 9. Créer un paiement avec simulation (pour développement)
-    public function storeSimulation(Request $request)
-    {
-        $request->validate([
-            'id_reservation' => 'required|exists:reservations,id_reservation',
-            'mode_paiement' => 'required|in:orange_money,mobicash,wave,carte',
-            'simuler_succes' => 'boolean'
-        ]);
-
-        $reservation = Reservation::findOrFail($request->id_reservation);
-
-        if ($reservation->paiement) {
-            return response()->json([
-                'message' => 'Cette réservation a déjà un paiement'
-            ], 400);
-        }
-
-        $succes = $request->simuler_succes ?? true;
-
-        if (!$succes) {
-            // Paiement échoué
-            $paiement = Paiement::create([
-                'id_reservation' => $request->id_reservation,
-                'montant' => $reservation->montant,
-                'mode_paiement' => $request->mode_paiement,
-                'date_paiement' => now(),
-                'statut' => 'echoue',
-                'reference_transaction' => 'FAIL_' . time() . '_' . uniqid()
-            ]);
-
-            return response()->json([
-                'message' => 'Paiement échoué',
-                'paiement' => $paiement
-            ], 400);
-        }
-
-        // Paiement réussi
-        $paiement = Paiement::create([
-            'id_reservation' => $request->id_reservation,
-            'montant' => $reservation->montant,
-            'mode_paiement' => $request->mode_paiement,
-            'date_paiement' => now(),
-            'statut' => 'paye',
-            'reference_transaction' => 'SIM_' . time() . '_' . uniqid()
-        ]);
-
-        $reservation->confirmerPaiement();
-
-        return response()->json([
-            'message' => 'Paiement effectué avec succès (simulation)',
-            'paiement' => $paiement,
-            'code_retrait' => $reservation->code_retrait
-        ], 201);
-    }
-
-    // 10. Marquer un paiement comme échoué
-    public function marquerEchoue($id_paiement)
-    {
-        $paiement = Paiement::findOrFail($id_paiement);
-
-        if ($paiement->statut !== 'en_attente') {
-            return response()->json([
-                'message' => 'Ce paiement ne peut pas être marqué comme échoué'
-            ], 400);
-        }
-
-        $paiement->marquerEchoue();
-
-        return response()->json([
-            'message' => 'Paiement marqué comme échoué',
-            'paiement' => $paiement
-        ]);
-    }
-
-    // 11. Rembourser un paiement
-    public function rembourser($id_paiement)
-    {
-        $paiement = Paiement::findOrFail($id_paiement);
-
-        if ($paiement->statut !== 'paye') {
-            return response()->json([
-                'message' => 'Seul un paiement payé peut être remboursé'
-            ], 400);
-        }
-
-        // Logique de remboursement à implémenter selon l'API de paiement
-        // $this->processRemboursement($paiement);
-
-        $paiement->statut = 'rembourse';
-        $paiement->save();
-
-        // Annuler la réservation liée
-        $reservation = $paiement->reservation;
-        $reservation->annuler();
-
-        return response()->json([
-            'message' => 'Paiement remboursé',
-            'paiement' => $paiement,
-            'reservation' => $reservation
-        ]);
-    }
-
-    // ==============================================
-    // 🔹 STATISTIQUES
-    // ==============================================
-
-    // 12. Statistiques des paiements
+    /**
+     * Statistiques des paiements
+     */
     public function statistiques()
     {
         $stats = [
@@ -307,10 +224,6 @@ class PaiementController extends Controller
                 'count' => Paiement::where('statut', 'paye')->count(),
                 'montant' => Paiement::where('statut', 'paye')->sum('montant')
             ],
-            'en_attente' => [
-                'count' => Paiement::where('statut', 'en_attente')->count(),
-                'montant' => Paiement::where('statut', 'en_attente')->sum('montant')
-            ],
             'echoues' => [
                 'count' => Paiement::where('statut', 'echoue')->count(),
                 'montant' => Paiement::where('statut', 'echoue')->sum('montant')
@@ -318,7 +231,7 @@ class PaiementController extends Controller
         ];
 
         // Par mode de paiement
-        $modes = ['orange_money', 'mobicash', 'wave', 'carte'];
+        $modes = ['orange_money', 'mobicash', 'wave', 'card', 'especes'];
         foreach ($modes as $mode) {
             $stats['par_mode'][$mode] = [
                 'count' => Paiement::where('mode_paiement', $mode)->count(),
@@ -329,75 +242,34 @@ class PaiementController extends Controller
         return response()->json($stats);
     }
 
-    // 13. Dashboard des paiements
-    public function dashboard()
+    /**
+     * Générer une référence de transaction unique
+     */
+    private function genererReference($mode)
     {
-        // Paiements du jour
-        $aujourdHui = Paiement::whereDate('date_paiement', today())->get();
+        $prefix = match($mode) {
+            'orange_money' => 'OM',
+            'mobicash' => 'MC',
+            'wave' => 'WV',
+            'card' => 'CD',
+            'especes' => 'CS',
+            default => 'PM'
+        };
         
-        // Paiements de la semaine
-        $semaine = Paiement::whereBetween('date_paiement', [now()->startOfWeek(), now()->endOfWeek()])->get();
-        
-        // Paiements du mois
-        $mois = Paiement::whereMonth('date_paiement', now()->month)->get();
-
-        $derniersPaiements = Paiement::with(['reservation.consommateur.user', 'reservation.station'])
-            ->orderBy('created_at', 'desc')
-            ->limit(20)
-            ->get();
-
-        return response()->json([
-            'aujourd_hui' => [
-                'count' => $aujourdHui->count(),
-                'montant' => $aujourdHui->sum('montant')
-            ],
-            'semaine' => [
-                'count' => $semaine->count(),
-                'montant' => $semaine->sum('montant')
-            ],
-            'mois' => [
-                'count' => $mois->count(),
-                'montant' => $mois->sum('montant')
-            ],
-            'derniers_paiements' => $derniersPaiements
-        ]);
+        return $prefix . '_' . date('Ymd') . '_' . strtoupper(uniqid());
     }
 
-    // 14. Chiffre d'affaires par période
-    public function caParPeriode(Request $request)
+    /**
+     * Déterminer la période de la vente
+     */
+    private function getPeriode()
     {
-        $request->validate([
-            'periode' => 'required|in:jour,semaine,mois,annee'
-        ]);
-
-        $query = Paiement::where('statut', 'paye');
-        
-        switch ($request->periode) {
-            case 'jour':
-                $query->whereDate('date_paiement', today());
-                $groupBy = 'heure';
-                break;
-            case 'semaine':
-                $query->whereBetween('date_paiement', [now()->startOfWeek(), now()->endOfWeek()]);
-                $groupBy = 'date';
-                break;
-            case 'mois':
-                $query->whereMonth('date_paiement', now()->month);
-                $groupBy = 'date';
-                break;
-            case 'annee':
-                $query->whereYear('date_paiement', now()->year);
-                $groupBy = 'mois';
-                break;
-        }
-
-        $montantTotal = $query->sum('montant');
-        $nombreTotal = $query->count();
-
-        return response()->json([
-            'periode' => $request->periode,
-            'montant_total' => $montantTotal,
-            'nombre_total' => $nombreTotal
-        ]);
+        $heure = now()->hour;
+        return match(true) {
+            $heure >= 6 && $heure < 12 => '6h-12h',
+            $heure >= 12 && $heure < 18 => '12h-18h',
+            $heure >= 18 && $heure < 24 => '18h-00h',
+            default => '00h-6h'
+        };
     }
 }

@@ -208,7 +208,14 @@ class AuthController extends Controller
             'icr' => fn() => $user->icr,
             'gerant' => fn() => $user->gerant,
             'chauffeur' => fn() => $user->chauffeur,
-            'pompiste' => fn() => $user->pompiste,
+            'pompiste' => fn() => $user->pompiste ? [
+                'id_pompiste' => $user->pompiste->id_pompiste,
+                'id_station' => $user->pompiste->id_station,
+                'station' => $user->pompiste->station ? [
+                    'id_station' => $user->pompiste->station->id_station,
+                    'nom' => $user->pompiste->station->nom
+                ] : null
+            ] : null,
             'consommateur' => fn() => $user->consommateur,
             'responsable_depot' => fn() => $user->responsableDepot,
             'manager' => fn() => $user->manager,

@@ -255,4 +255,10 @@ protected $fillable = [
             $q->where('id_mission', $id_mission);
         })->get();
     }
+
+    // ✅ AJOUTE CETTE RELATION (belongsTo direct)
+public function mission()
+{
+    return $this->belongsTo(Mission::class, 'id_mission', 'id_mission');
+}
 }

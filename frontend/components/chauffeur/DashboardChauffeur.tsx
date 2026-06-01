@@ -5,7 +5,6 @@ import {
   getMissionEnCoursChauffeur,
   envoyerPositionChauffeur,
   demarrerMissionChauffeur,
-  validerLivraisonChauffeur,
   signalerIncidentChauffeur,
   signerCertificatChauffeur,
 } from "../../lib/api";
@@ -655,7 +654,7 @@ export default function DashboardChauffeur() {
           </div>
         )}
 
-      {/* LIVRAISONS */}
+   {/* LIVRAISONS - Version corrigée (sans validation par le chauffeur) */}
 {activeTab === "livraisons" && (
   <div className="space-y-4">
     {mission.livraisons.map((livraison) => (
@@ -676,15 +675,15 @@ export default function DashboardChauffeur() {
           </span>
         </div>
         
-        {/* Code à donner au gérant */}
+        {/* Code à donner au gérant - C'est la seule action du chauffeur */}
         {livraison.statut === "en_attente" && (
-          <div className="mb-4 p-3 bg-orange-500/20 rounded-lg">
-            <p className="text-xs text-gray-400">Code à donner au gérant :</p>
-            <p className="text-3xl font-mono font-bold text-orange-400 text-center tracking-wider">
+          <div className="mb-4 p-4 bg-orange-500/20 rounded-lg border border-orange-500/30">
+            <p className="text-xs text-gray-400 text-center">📢 Code à communiquer au gérant :</p>
+            <p className="text-4xl font-mono font-bold text-orange-400 text-center tracking-wider my-2">
               {livraison.code_validation}
             </p>
-            <p className="text-xs text-gray-500 text-center mt-1">
-              Communiquez ce code au gérant pour valider la livraison
+            <p className="text-xs text-gray-500 text-center">
+              Ce code permettra au gérant de valider la livraison dans son application
             </p>
           </div>
         )}
@@ -700,29 +699,15 @@ export default function DashboardChauffeur() {
           </div>
         </div>
         
-        
-        {livraison.statut === "en_attente" && (
-          <button
-            onClick={() => {
-              setCurrentLivraison(livraison);
-              setShowSignatureModal(true);
-            }}
-            className="w-full px-4 py-2 rounded-lg bg-gradient-to-r from-orange-500 to-green-500 text-black font-semibold"
-          >
-            📝 Valider la livraison
-          </button>
-        )}
-        
         {livraison.statut === "validee" && livraison.date_livraison && (
-          <p className="text-xs text-gray-500 mt-2">
-            Livrée le {new Date(livraison.date_livraison).toLocaleString()}
+          <p className="text-xs text-green-400 mt-2 text-center">
+            ✓ Livrée le {new Date(livraison.date_livraison).toLocaleString()}
           </p>
         )}
       </div>
     ))}
   </div>
 )}
-
         {/* ITINERAIRE AVEC CARTE */}
         {activeTab === "itineraire" && (
           <div className="space-y-4">

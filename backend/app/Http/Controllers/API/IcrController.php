@@ -13,6 +13,7 @@ use App\Models\Camion;
 use App\Models\Certificat;
 use App\Models\Livraison;
 use App\Models\Station;
+use App\Models\Notification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
@@ -450,11 +451,11 @@ public function organiserMission(Request $request)
             'statut' => 'planifiee'
         ]);
 
-        // 2. Créer les livraisons
+        // 2. Créer les livraisons et envoyer les notifications
         foreach ($request->livraisons as $livraison) {
             $station = Station::find($livraison['id_station']);
             
-            Livraison::create([
+            $liv = Livraison::create([
                 'id_mission' => $mission->id_mission,
                 'id_station' => $livraison['id_station'],
                 'quantite_prevue' => $livraison['quantite_prevue'],
@@ -462,11 +463,27 @@ public function organiserMission(Request $request)
                 'statut' => 'en_attente',
                 'id_gerant' => $station ? $station->id_gerant : null
             ]);
+            
+            // ✅ ENVOYER UNE NOTIFICATION AU GÉRANT DE LA STATION
+            if ($station && $station->id_gerant) {
+                $gerant = \App\Models\Gerant::find($station->id_gerant);
+                if ($gerant && $gerant->user) {
+                    \App\Models\Notification::create([
+                        'type' => 'livraison',
+                        'titre' => '📦 Nouvelle livraison en attente',
+                        'message' => "Une livraison de {$livraison['quantite_prevue']}L est prévue pour votre station {$station->nom}. Code: {$livraison['code_validation']}",
+                        'id_destinataire' => $gerant->user->id_utilisateur,
+                        'lu' => false,
+                        'lien' => '/gerant/livraisons',
+                        'created_at' => now()
+                    ]);
+                }
+            }
         }
 
         DB::commit();
         
-        // 3. Retourner l'ID mission (PAS de certificat ici)
+        // 3. Retourner l'ID mission
         return response()->json([
             'success' => true,
             'message' => 'Mission organisée avec succès',
@@ -479,7 +496,6 @@ public function organiserMission(Request $request)
         return response()->json(['message' => 'Erreur: ' . $e->getMessage()], 500);
     }
 }
-
     public function voirMissions()
     {
         $user = auth()->user();
