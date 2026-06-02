@@ -64,56 +64,52 @@ class FournisseurController extends Controller
      * 1. Création du bon d'enlèvement
      */
     public function creerBon(Request $request)
-    {
-        $request->validate([
-            'type_carburant' => 'required|in:essence,gasoil',
-            'quantite_commandee' => 'required|numeric|min:0.01',
-            'date_disponibilite' => 'required|date',
-            'id_depot' => 'required|exists:depots,id_depot',
-            'id_icr' => 'required|exists:icr,id_icr'
+{
+    $request->validate([
+        'type_carburant' => 'required|in:essence,gasoil',
+        'quantite_commandee' => 'required|numeric|min:0.01',
+        'id_depot' => 'required|exists:depots,id_depot',
+        'id_icr' => 'required|exists:icr,id_icr'
+    ]);
+
+    DB::beginTransaction();
+
+    try {
+        $fournisseurId = auth()->user()->fournisseur->id_fournisseur;
+        $codeVerification = str_pad(random_int(0, 9999), 4, '0', STR_PAD_LEFT);
+
+        $bon = Bon::create([
+            'code_verification' => $codeVerification,
+            'type_carburant' => $request->type_carburant,
+            'quantite_commandee' => $request->quantite_commandee,
+            'quantite_chargee' => null,
+            'date_creation' => Carbon::now(),
+            'date_disponibilite' => null,  // ← NULL
+            'statut' => 'cree',
+            'signature_fournisseur' => null,
+            'photo_compteur' => null,
+            'id_fournisseur' => $fournisseurId,
+            'id_icr' => $request->id_icr,
+            'id_depot' => $request->id_depot
         ]);
 
-        DB::beginTransaction();
+        $bon->load(['icr.user', 'depot.responsable.user']);
+        $this->notifierBonDestinataires($bon, 'creation');
 
-        try {
-            $fournisseurId = auth()->user()->fournisseur->id_fournisseur;
-            $codeVerification = str_pad(random_int(0, 9999), 4, '0', STR_PAD_LEFT);
+        DB::commit();
 
-            $bon = Bon::create([
-                'code_verification' => $codeVerification,
-                'type_carburant' => $request->type_carburant,
-                'quantite_commandee' => $request->quantite_commandee,
-                'quantite_chargee' => null,
-                'date_creation' => Carbon::now(),
-                'date_disponibilite' => $request->date_disponibilite,
-                'statut' => 'cree',
-                'signature_fournisseur' => null,
-                'photo_compteur' => null,
-                'id_fournisseur' => $fournisseurId,
-                'id_icr' => $request->id_icr,
-                'id_depot' => $request->id_depot
-            ]);
+        return response()->json([
+            'message' => 'Bon créé avec succès',
+            'bon' => $bon->load(['fournisseur.user', 'icr.user', 'depot']),
+            'code_verification' => $codeVerification
+        ], 201);
 
-            // Recharge avec les relations
-            $bon->load(['icr.user', 'depot.responsable.user']);
-            
-            // Envoyer les notifications
-            $this->notifierBonDestinataires($bon, 'creation');
-
-            DB::commit();
-
-            return response()->json([
-                'message' => 'Bon créé avec succès',
-                'bon' => $bon->load(['fournisseur.user', 'icr.user', 'depot']),
-                'code_verification' => $codeVerification
-            ], 201);
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            \Log::error('Erreur création bon: ' . $e->getMessage());
-            return response()->json(['message' => 'Erreur lors de la création: ' . $e->getMessage()], 500);
-        }
+    } catch (\Exception $e) {
+        DB::rollBack();
+        \Log::error('Erreur création bon: ' . $e->getMessage());
+        return response()->json(['message' => 'Erreur lors de la création: ' . $e->getMessage()], 500);
     }
+}
 
     /**
      * 2. Signature électronique
@@ -157,56 +153,69 @@ class FournisseurController extends Controller
     /**
      * 3. Transmettre le bon (envoi à l'ICR et au dépôt)
      */
-    public function transmettreBon($id)
-    {
-        try {
-            $bon = Bon::where('id_bon', $id)
-                ->where('id_fournisseur', auth()->user()->fournisseur->id_fournisseur)
-                ->with(['icr.user', 'depot.responsable.user'])
-                ->firstOrFail();
+    /**
+ * 3. Transmettre le bon (envoi à l'ICR et au dépôt)
+ */
+/**
+ * 3. Transmettre le bon (envoi à l'ICR et au dépôt) - UNE SEULE FOIS
+ */
+public function transmettreBon($id)
+{
+    try {
+        $bon = Bon::where('id_bon', $id)
+            ->where('id_fournisseur', auth()->user()->fournisseur->id_fournisseur)
+            ->with(['icr.user', 'depot.responsable.user'])
+            ->firstOrFail();
 
-            if ($bon->statut !== 'signe') {
-                return response()->json(['message' => 'Seul un bon signé peut être transmis'], 400);
-            }
-
-            // Notification à l'ICR
-            if ($bon->icr && $bon->icr->user) {
-                Notification::create([
-                    'titre' => 'Bon transmis',
-                    'message' => "Le bon d'enlèvement vous a été transmis. Code: {$bon->code_verification}",
-                    'date_envoi' => now(),
-                    'lu' => false,
-                    'id_destinataire' => $bon->icr->user->id_utilisateur
-                ]);
-                \Log::info('Transmission - Notification envoyée à ICR: ' . $bon->icr->user->id_utilisateur);
-            } else {
-                \Log::warning('Transmission - ICR non trouvé');
-            }
-
-            // Notification au responsable du dépôt
-            if ($bon->depot && $bon->depot->responsable && $bon->depot->responsable->user) {
-                Notification::create([
-                    'titre' => 'Bon transmis au dépôt',
-                    'message' => "Un bon d'enlèvement vous a été transmis pour votre dépôt. Code: {$bon->code_verification}",
-                    'date_envoi' => now(),
-                    'lu' => false,
-                    'id_destinataire' => $bon->depot->responsable->user->id_utilisateur
-                ]);
-                \Log::info('Transmission - Notification envoyée au responsable dépôt: ' . $bon->depot->responsable->user->id_utilisateur);
-            } else {
-                \Log::warning('Transmission - Responsable dépôt non trouvé');
-            }
-
-            return response()->json([
-                'message' => 'Bon transmis avec succès',
-                'bon' => $bon
-            ]);
-
-        } catch (\Exception $e) {
-            \Log::error('Erreur transmission: ' . $e->getMessage());
-            return response()->json(['message' => 'Erreur lors de la transmission: ' . $e->getMessage()], 500);
+        // Vérifier que le bon est signé
+        if ($bon->statut !== 'signe') {
+            return response()->json(['message' => 'Seul un bon signé peut être transmis'], 400);
         }
+
+        // ✅ VÉRIFIER SI LE BON A DÉJÀ ÉTÉ TRANSMIS
+        if ($bon->date_transmission !== null) {
+            return response()->json([
+                'message' => 'Ce bon a déjà été transmis le ' . date('d/m/Y H:i', strtotime($bon->date_transmission)),
+                'deja_transmis' => true
+            ], 400);
+        }
+
+        // ✅ ENREGISTRER LA DATE DE TRANSMISSION
+        $bon->date_transmission = now();
+        $bon->save();
+
+        // Notifications
+        if ($bon->icr && $bon->icr->user) {
+            Notification::create([
+                'titre' => 'Bon transmis - Action requise',
+                'message' => "Un bon d'enlèvement vous a été transmis. Code: {$bon->code_verification}",
+                'date_envoi' => now(),
+                'lu' => false,
+                'id_destinataire' => $bon->icr->user->id_utilisateur
+            ]);
+        }
+
+        if ($bon->depot && $bon->depot->responsable && $bon->depot->responsable->user) {
+            Notification::create([
+                'titre' => 'Nouveau bon à traiter',
+                'message' => "Un bon d'enlèvement vous a été transmis pour votre dépôt. Code: {$bon->code_verification}",
+                'date_envoi' => now(),
+                'lu' => false,
+                'id_destinataire' => $bon->depot->responsable->user->id_utilisateur
+            ]);
+        }
+
+        return response()->json([
+            'message' => 'Bon transmis avec succès',
+            'bon' => $bon,
+            'date_transmission' => $bon->date_transmission
+        ]);
+
+    } catch (\Exception $e) {
+        \Log::error('Erreur transmission: ' . $e->getMessage());
+        return response()->json(['message' => 'Erreur lors de la transmission: ' . $e->getMessage()], 500);
     }
+}
 
     /**
      * 4. Suivi du bon (début et fin de chargement)

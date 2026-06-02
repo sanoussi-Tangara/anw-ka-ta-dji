@@ -15,6 +15,8 @@ class Bon extends Model
         'type_carburant',
         'quantite_commandee',
         'quantite_chargee',
+        'debut_chargement',      // ← AJOUTER
+        'fin_chargement',        // ← AJOUTER
         'date_creation',
         'date_disponibilite',
         'statut',
@@ -22,7 +24,8 @@ class Bon extends Model
         'photo_compteur',
         'id_fournisseur',
         'id_icr',
-        'id_depot'
+        'id_depot',
+        'date_transmission'
         
     ];
 

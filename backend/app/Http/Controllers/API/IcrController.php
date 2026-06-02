@@ -330,46 +330,46 @@ class IcrController extends Controller
     // ==============================================
 
     public function voirCamions()
-{
-    $user = auth()->user();
-    $icr = Icr::where('id_utilisateur', $user->id_utilisateur)->first();
-    
-    if (!$icr) {
-        return response()->json(['message' => 'ICR non trouvé', 'camions' => []], 404);
+    {
+        $user = auth()->user();
+        $icr = Icr::where('id_utilisateur', $user->id_utilisateur)->first();
+        
+        if (!$icr) {
+            return response()->json(['message' => 'ICR non trouvé', 'camions' => []], 404);
+        }
+        
+        $camions = Camion::where('id_icr', $icr->id_icr)->get();
+        return response()->json(['camions' => $camions]);
     }
-    
-    $camions = Camion::where('id_icr', $icr->id_icr)->get();
-    return response()->json(['camions' => $camions]);
-}
 
+    public function creerCamion(Request $request)
+    {
+        $user = auth()->user();
+        $icr = Icr::where('id_utilisateur', $user->id_utilisateur)->first();
+        
+        if (!$icr) {
+            return response()->json(['message' => 'ICR non trouvé'], 404);
+        }
+        
+        $request->validate([
+            'immatriculation' => 'required|string|max:20|unique:camions',
+            'capacite' => 'required|numeric|min:0',
+            'type_carburant' => 'required|in:essence,gasoil',
+            'id_chauffeur' => 'required|exists:chauffeurs,id_chauffeur'
+        ]);
 
-public function creerCamion(Request $request)
-{
-    $user = auth()->user();
-    $icr = Icr::where('id_utilisateur', $user->id_utilisateur)->first();
-    
-    if (!$icr) {
-        return response()->json(['message' => 'ICR non trouvé'], 404);
+        $camion = Camion::create([
+            'id_icr' => $icr->id_icr,
+            'immatriculation' => $request->immatriculation,
+            'capacite' => $request->capacite,
+            'type_carburant' => $request->type_carburant,
+            'statut' => 'disponible',
+            'id_chauffeur' => $request->id_chauffeur
+        ]);
+
+        return response()->json(['message' => 'Camion créé avec succès', 'camion' => $camion], 201);
     }
-    
-    $request->validate([
-        'immatriculation' => 'required|string|max:20|unique:camions',
-        'capacite' => 'required|numeric|min:0',
-        'type_carburant' => 'required|in:essence,gasoil',
-        'id_chauffeur' => 'required|exists:chauffeurs,id_chauffeur'
-    ]);
 
-    $camion = Camion::create([
-        'id_icr' => $icr->id_icr,  // ← VÉRIFIE QUE CETTE LIGNE EXISTE
-        'immatriculation' => $request->immatriculation,
-        'capacite' => $request->capacite,
-        'type_carburant' => $request->type_carburant,
-        'statut' => 'disponible',
-        'id_chauffeur' => $request->id_chauffeur
-    ]);
-
-    return response()->json(['message' => 'Camion créé avec succès', 'camion' => $camion], 201);
-}
     public function desactiverCamion($id_camion)
     {
         $camion = Camion::findOrFail($id_camion);
@@ -406,10 +406,19 @@ public function creerCamion(Request $request)
         }
         
         $bons = Bon::where('id_icr', $icr->id_icr)
+            ->whereIn('statut', ['signe', 'en_cours', 'termine'])
             ->with(['fournisseur.user', 'depot'])
+            ->orderByRaw("FIELD(statut, 'signe', 'en_cours', 'termine')")
             ->orderBy('created_at', 'desc')
             ->get();
-        return response()->json(['bons' => $bons]);
+        
+        return response()->json([
+            'bons' => $bons,
+            'total' => $bons->count(),
+            'en_attente' => $bons->where('statut', 'signe')->count(),
+            'en_cours' => $bons->where('statut', 'en_cours')->count(),
+            'termines' => $bons->where('statut', 'termine')->count()
+        ]);
     }
 
     public function detailBon($id_bon)
@@ -421,81 +430,113 @@ public function creerCamion(Request $request)
     // ==============================================
     // 🔹 GESTION DES MISSIONS
     // ==============================================
-public function organiserMission(Request $request)
-{
-    $user = auth()->user();
-    $icr = Icr::where('id_utilisateur', $user->id_utilisateur)->first();
-    
-    if (!$icr) {
-        return response()->json(['message' => 'ICR non trouvé'], 404);
-    }
-    
-    $request->validate([
-        'id_bon' => 'required|exists:bons,id_bon',
-        'id_chauffeur' => 'required|exists:chauffeurs,id_chauffeur',
-        'id_camion' => 'required|exists:camions,id_camion',
-        'livraisons' => 'required|array|min:1',
-        'livraisons.*.id_station' => 'required|exists:stations,id_station',
-        'livraisons.*.quantite_prevue' => 'required|numeric|min:1',
-        'livraisons.*.code_validation' => 'required|string|size:4'
-    ]);
 
-    DB::beginTransaction();
-    try {
-        // 1. Créer la mission
-        $mission = Mission::create([
-            'id_bon' => $request->id_bon,
-            'id_icr' => $icr->id_icr,
-            'id_chauffeur' => $request->id_chauffeur,
-            'id_camion' => $request->id_camion,
-            'statut' => 'planifiee'
+    public function organiserMission(Request $request)
+    {
+        $user = auth()->user();
+        $icr = Icr::where('id_utilisateur', $user->id_utilisateur)->first();
+        
+        if (!$icr) {
+            return response()->json(['message' => 'ICR non trouvé'], 404);
+        }
+        
+        $request->validate([
+            'id_bon' => 'required|exists:bons,id_bon',
+            'id_chauffeur' => 'required|exists:chauffeurs,id_chauffeur',
+            'id_camion' => 'required|exists:camions,id_camion',
+            'livraisons' => 'required|array|min:1',
+            'livraisons.*.id_station' => 'required|exists:stations,id_station',
+            'livraisons.*.quantite_prevue' => 'required|numeric|min:1',
+            'livraisons.*.code_validation' => 'required|string|size:4'
         ]);
 
-        // 2. Créer les livraisons et envoyer les notifications
-        foreach ($request->livraisons as $livraison) {
-            $station = Station::find($livraison['id_station']);
-            
-            $liv = Livraison::create([
-                'id_mission' => $mission->id_mission,
-                'id_station' => $livraison['id_station'],
-                'quantite_prevue' => $livraison['quantite_prevue'],
-                'code_validation' => $livraison['code_validation'],
-                'statut' => 'en_attente',
-                'id_gerant' => $station ? $station->id_gerant : null
-            ]);
-            
-            // ✅ ENVOYER UNE NOTIFICATION AU GÉRANT DE LA STATION
-            if ($station && $station->id_gerant) {
-                $gerant = \App\Models\Gerant::find($station->id_gerant);
-                if ($gerant && $gerant->user) {
-                    \App\Models\Notification::create([
-                        'type' => 'livraison',
-                        'titre' => '📦 Nouvelle livraison en attente',
-                        'message' => "Une livraison de {$livraison['quantite_prevue']}L est prévue pour votre station {$station->nom}. Code: {$livraison['code_validation']}",
-                        'id_destinataire' => $gerant->user->id_utilisateur,
-                        'lu' => false,
-                        'lien' => '/gerant/livraisons',
-                        'created_at' => now()
-                    ]);
-                }
-            }
+        // Vérifier si une mission existe déjà pour ce bon
+        $missionExistante = Mission::where('id_bon', $request->id_bon)->first();
+        
+        if ($missionExistante) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Une mission a déjà été organisée pour ce bon.',
+                'mission_existante' => [
+                    'id_mission' => $missionExistante->id_mission,
+                    'statut' => $missionExistante->statut,
+                    'date_creation' => $missionExistante->created_at
+                ]
+            ], 400);
         }
 
-        DB::commit();
-        
-        // 3. Retourner l'ID mission
-        return response()->json([
-            'success' => true,
-            'message' => 'Mission organisée avec succès',
-            'id_mission' => $mission->id_mission,
-            'mission' => $mission
-        ], 201);
-        
-    } catch (\Exception $e) {
-        DB::rollBack();
-        return response()->json(['message' => 'Erreur: ' . $e->getMessage()], 500);
+        DB::beginTransaction();
+        try {
+            $mission = Mission::create([
+                'id_bon' => $request->id_bon,
+                'id_icr' => $icr->id_icr,
+                'id_chauffeur' => $request->id_chauffeur,
+                'id_camion' => $request->id_camion,
+                'statut' => 'planifiee'
+            ]);
+
+            foreach ($request->livraisons as $livraison) {
+                $station = Station::find($livraison['id_station']);
+                
+                Livraison::create([
+                    'id_mission' => $mission->id_mission,
+                    'id_station' => $livraison['id_station'],
+                    'quantite_prevue' => $livraison['quantite_prevue'],
+                    'code_validation' => $livraison['code_validation'],
+                    'statut' => 'en_attente',
+                    'id_gerant' => $station ? $station->id_gerant : null
+                ]);
+                
+                // ENVOYER UNE NOTIFICATION AU GÉRANT DE LA STATION - CORRIGÉ AVEC date_envoi
+                if ($station && $station->id_gerant) {
+                    $gerant = \App\Models\Gerant::find($station->id_gerant);
+                    if ($gerant && $gerant->user) {
+                        \App\Models\Notification::create([
+                            'type' => 'livraison',
+                            'titre' => '📦 Nouvelle livraison en attente',
+                            'message' => "Une livraison de {$livraison['quantite_prevue']}L est prévue pour votre station {$station->nom}. Code: {$livraison['code_validation']}",
+                            'id_destinataire' => $gerant->user->id_utilisateur,
+                            'lu' => false,
+                            'lien' => '/gerant/livraisons',
+                            'date_envoi' => now(),  // ← LIGNE AJOUTÉE
+                            'created_at' => now(),
+                            'updated_at' => now()
+                        ]);
+                    }
+                }
+            }
+
+            $bon = Bon::find($request->id_bon);
+            if ($bon && $bon->statut !== 'termine') {
+                $bon->statut = 'en_cours';
+                $bon->save();
+            }
+
+            DB::commit();
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Mission organisée avec succès',
+                'id_mission' => $mission->id_mission,
+                'mission' => $mission
+            ], 201);
+            
+        } catch (\Illuminate\Database\QueryException $e) {
+            DB::rollBack();
+            if ($e->errorInfo[1] == 1062) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Une mission existe déjà pour ce bon.',
+                    'deja_organisee' => true
+                ], 400);
+            }
+            return response()->json(['message' => 'Erreur: ' . $e->getMessage()], 500);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Erreur: ' . $e->getMessage()], 500);
+        }
     }
-}
+
     public function voirMissions()
     {
         $user = auth()->user();
@@ -716,41 +757,41 @@ public function organiserMission(Request $request)
             'certificat' => $certificat
         ]);
     }
-public function signerCertificat(Request $request)
-{
-    $request->validate([
-        'id_certificat' => 'required|exists:certificats,id_certificat',
-        'signature' => 'required|string',
-        'signataire' => 'required|in:icr,chauffeur'
-    ]);
 
-    $certificat = Certificat::findOrFail($request->id_certificat);
-    
-    if ($request->signataire === 'icr') {
-        $certificat->signature_icr = $request->signature;
-    } else {
-        $certificat->signature_chauffeur = $request->signature;
-    }
-    
-    $certificat->save();
+    public function signerCertificat(Request $request)
+    {
+        $request->validate([
+            'id_certificat' => 'required|exists:certificats,id_certificat',
+            'signature' => 'required|string',
+            'signataire' => 'required|in:icr,chauffeur'
+        ]);
 
-    // Vérifier si les deux signatures sont présentes
-    if ($certificat->signature_icr && $certificat->signature_chauffeur) {
-        $certificat->statut = 'signe';
-        $certificat->save();
+        $certificat = Certificat::findOrFail($request->id_certificat);
         
-        // Démarrer la mission
-        $mission = $certificat->mission;
-        $mission->date_depart = now();
-        $mission->statut = 'en_cours';
-        $mission->save();
+        if ($request->signataire === 'icr') {
+            $certificat->signature_icr = $request->signature;
+        } else {
+            $certificat->signature_chauffeur = $request->signature;
+        }
+        
+        $certificat->save();
+
+        if ($certificat->signature_icr && $certificat->signature_chauffeur) {
+            $certificat->statut = 'signe';
+            $certificat->save();
+            
+            $mission = $certificat->mission;
+            $mission->date_depart = now();
+            $mission->statut = 'en_cours';
+            $mission->save();
+        }
+
+        return response()->json([
+            'message' => 'Signature enregistrée',
+            'certificat' => $certificat
+        ]);
     }
 
-    return response()->json([
-        'message' => 'Signature enregistrée',
-        'certificat' => $certificat
-    ]);
-}
     public function voirCertificat($id_mission)
     {
         $certificat = Certificat::with(['mission.bon', 'mission.chauffeur.user', 'mission.livraisons.station'])
@@ -791,25 +832,45 @@ public function signerCertificat(Request $request)
             'mission' => $mission
         ]);
     }
+public function terminerMission($id_mission)
+{
+    $mission = Mission::findOrFail($id_mission);
+    
+    if ($mission->statut !== 'en_cours') {
+        return response()->json(['message' => 'Mission non terminable'], 400);
+    }
 
-    public function terminerMission($id_mission)
-    {
-        $mission = Mission::findOrFail($id_mission);
-        
-        if ($mission->statut !== 'en_cours') {
-            return response()->json(['message' => 'Mission non terminable'], 400);
-        }
+    $mission->statut = 'terminee';
+    $mission->date_arrivee_reelle = now();
+    $mission->save();
 
-        $mission->statut = 'terminee';
-        $mission->date_arrivee_reelle = now();
-        $mission->save();
+    // Mettre à jour le statut du bon
+    $mission->bon->statut = 'termine';
+    $mission->bon->save();
 
-        $mission->bon->statut = 'termine';
-        $mission->bon->save();
+    // ✅ LIBÉRER LE CAMION - Changer son statut à "disponible"
+    if ($mission->camion) {
+        $camion = $mission->camion;
+        $camion->statut = 'disponible';
+        $camion->save();
+    }
 
-        return response()->json([
-            'message' => 'Mission terminée',
-            'mission' => $mission
+    // ✅ NOTIFIER LE CHAUFFEUR QUE LA MISSION EST TERMINÉE
+    if ($mission->chauffeur && $mission->chauffeur->user) {
+        Notification::create([
+            'titre' => '✅ Mission terminée',
+            'message' => "La mission #{$mission->id_mission} est terminée. Vous êtes maintenant disponible pour de nouvelles missions.",
+            'id_destinataire' => $mission->chauffeur->user->id_utilisateur,
+            'lu' => false,
+            'date_envoi' => now(),
+            'created_at' => now(),
+            'updated_at' => now()
         ]);
     }
+
+    return response()->json([
+        'message' => 'Mission terminée. Le chauffeur et le camion sont maintenant disponibles pour d\'autres missions.',
+        'mission' => $mission
+    ]);
+}
 }

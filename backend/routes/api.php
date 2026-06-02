@@ -118,6 +118,7 @@ Route::prefix('responsable-depot')->group(function () {
     Route::put('desactiver/{id}', [ResponsableDepotController::class, 'desactiver']);
     Route::put('activer/{id}', [ResponsableDepotController::class, 'activer']);
     
+    
     // Gestion des bons
     Route::get('bons-recus/{id_responsable}', [ResponsableDepotController::class, 'bonsRecus']);
     Route::get('bon/{id_bon}', [ResponsableDepotController::class, 'detailBon']);
@@ -137,6 +138,15 @@ Route::prefix('responsable-depot')->group(function () {
     Route::get('profil/{id_responsable}', [ResponsableDepotController::class, 'profil']);
     Route::put('profil/{id_responsable}', [ResponsableDepotController::class, 'updateProfil']);
 });
+});
+
+// ========== NOTIFICATIONS POUR RESPONSABLE DÉPÔT ==========
+Route::middleware(['auth:sanctum', 'role:responsable_depot'])->prefix('responsable-depot')->group(function () {
+    Route::get('/notifications', [ResponsableDepotController::class, 'getNotifications']);
+    Route::get('/notifications/non-lues', [ResponsableDepotController::class, 'getNotificationsNonLues']);
+    Route::get('/notifications/statistiques', [ResponsableDepotController::class, 'getNotificationsStatistiques']);
+    Route::put('/notifications/{id}/lire', [ResponsableDepotController::class, 'marquerNotificationLue']);
+    Route::put('/notifications/lire-toutes', [ResponsableDepotController::class, 'marquerToutesNotificationsLues']);
 });
 
 // ==============================================
@@ -162,6 +172,7 @@ Route::prefix('fournisseur')->middleware(['auth:sanctum', 'role:fournisseur'])->
     Route::get('icrs', [FournisseurController::class, 'listeIcrs']);
     Route::get('depots', [FournisseurController::class, 'listeDepots']);
     Route::get('bon/details/{id}', [FournisseurController::class, 'getDetailsBon']);
+
 });
 
 // ==============================================
@@ -349,7 +360,7 @@ Route::middleware(['auth:sanctum', 'role:chauffeur'])->prefix('chauffeur')->grou
     Route::post('/mission/{id_mission}/demarrer', [ChauffeurController::class, 'demarrerMission']);
     Route::post('/mission/{id_mission}/terminer', [ChauffeurController::class, 'terminerMission']);
     Route::get('/mission/{id_mission}/details', [ChauffeurController::class, 'detailsMission']);
-    
+    Route::get('/missions-planifiees/{id_chauffeur}', [ChauffeurController::class, 'missionsPlanifiees']);
     // Livraisons
     Route::get('/livraisons/{id_chauffeur}', [ChauffeurController::class, 'livraisonsAEffectuer']);
     Route::post('/livraison/valider', [ChauffeurController::class, 'validerLivraison']);

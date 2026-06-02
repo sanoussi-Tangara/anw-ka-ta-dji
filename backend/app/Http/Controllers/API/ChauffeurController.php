@@ -33,7 +33,6 @@ class ChauffeurController extends Controller
         DB::beginTransaction();
 
         try {
-            // Créer l'utilisateur
             $user = User::create([
                 'nom' => $request->nom,
                 'prenom' => $request->prenom,
@@ -44,7 +43,6 @@ class ChauffeurController extends Controller
                 'permis' => $request->permis
             ]);
 
-            // Créer le chauffeur
             $chauffeur = Chauffeur::create([
                 'id_utilisateur' => $user->id_utilisateur,
                 'id_icr' => $request->id_icr,
@@ -87,38 +85,67 @@ class ChauffeurController extends Controller
     }
 
     // 4. Voir la mission en cours
-public function missionEnCours($id_chauffeur)
+   public function missionEnCours($id_chauffeur)
 {
     $chauffeur = Chauffeur::findOrFail($id_chauffeur);
     
+    // Vérifier d'abord s'il y a une mission en cours
     $mission = Mission::where('id_chauffeur', $chauffeur->id_chauffeur)
-        ->whereIn('statut', ['planifiee', 'en_cours'])
+        ->where('statut', 'en_cours')
         ->with([
             'bon.depot',
             'bon.fournisseur',
             'camion',
             'livraisons.station',
-            'certificat'  // ← Important pour le certificat
+            'certificat'
         ])
         ->first();
     
-    if (!$mission) {
+    if ($mission) {
         return response()->json([
-            'has_mission' => false,
-            'mission' => null
-        ], 200);
+            'has_mission' => true,
+            'mission' => $this->formatMission($mission),
+            'statut' => 'en_cours',
+            'message' => 'Une mission est en cours. Terminez-la pour voir les nouvelles missions.'
+        ]);
     }
-
-    // Log pour debug
-    \Log::info('Certificat trouvé: ' . ($mission->certificat ? 'oui' : 'non'));
-    if ($mission->certificat) {
-        \Log::info('Signature ICR: ' . ($mission->certificat->signature_icr ? 'oui' : 'non'));
-        \Log::info('Signature Chauffeur: ' . ($mission->certificat->signature_chauffeur ? 'oui' : 'non'));
+    
+    // ✅ Récupérer TOUTES les missions planifiées (pas seulement la première)
+    $missionsPlanifiees = Mission::where('id_chauffeur', $chauffeur->id_chauffeur)
+        ->where('statut', 'planifiee')
+        ->with([
+            'bon.depot',
+            'bon.fournisseur',
+            'camion',
+            'livraisons.station',
+            'certificat'
+        ])
+        ->orderBy('created_at', 'asc')
+        ->get();
+    
+    if ($missionsPlanifiees->count() > 0) {
+        // Prendre la première mission planifiée
+        $missionPlanifiee = $missionsPlanifiees->first();
+        
+        return response()->json([
+            'has_mission' => true,
+            'mission' => $this->formatMission($missionPlanifiee),
+            'statut' => 'planifiee',
+            'missions_restantes' => $missionsPlanifiees->count() - 1,
+            'message' => 'Vous avez une mission planifiée'
+        ]);
     }
-
+    
     return response()->json([
-        'has_mission' => true,
-        'mission' => [
+        'has_mission' => false,
+        'mission' => null
+    ], 200);
+}
+
+    // Méthode helper pour formater la mission
+    private function formatMission($mission)
+    {
+        return [
             'id_mission' => $mission->id_mission,
             'statut' => $mission->statut,
             'date_debut' => $mission->date_debut,
@@ -164,10 +191,46 @@ public function missionEnCours($id_chauffeur)
                 'est_signe_icr' => !empty($mission->certificat->signature_icr),
                 'est_signe_chauffeur' => !empty($mission->certificat->signature_chauffeur),
                 'est_complet' => !empty($mission->certificat->signature_icr) && !empty($mission->certificat->signature_chauffeur)
-            ] : null  // ← S'assurer que c'est null si pas de certificat
-        ]
-    ]);
-}
+            ] : null
+        ];
+    }
+
+    // ✅ NOUVELLE MÉTHODE: Voir les missions planifiées (disponibles)
+    public function missionsPlanifiees($id_chauffeur)
+    {
+        $chauffeur = Chauffeur::findOrFail($id_chauffeur);
+        
+        // Vérifier si le chauffeur a une mission en cours
+        $missionEnCours = Mission::where('id_chauffeur', $chauffeur->id_chauffeur)
+            ->where('statut', 'en_cours')
+            ->first();
+        
+        if ($missionEnCours) {
+            return response()->json([
+                'has_mission_en_cours' => true,
+                'mission_en_cours' => $missionEnCours,
+                'missions_planifiees' => [],
+                'nombre_missions' => 0,
+                'message' => 'Vous avez une mission en cours'
+            ]);
+        }
+        
+        // Récupérer les missions planifiées pour ce chauffeur
+        $missionsPlanifiees = Mission::where('id_chauffeur', $chauffeur->id_chauffeur)
+            ->where('statut', 'planifiee')
+            ->with(['bon', 'camion', 'livraisons.station'])
+            ->orderBy('created_at', 'asc')
+            ->get();
+        
+        return response()->json([
+            'has_mission_en_cours' => false,
+            'missions_planifiees' => $missionsPlanifiees,
+            'nombre_missions' => $missionsPlanifiees->count(),
+            'message' => $missionsPlanifiees->count() > 0 
+                ? 'Vous avez des missions disponibles' 
+                : 'Aucune mission planifiée pour le moment'
+        ]);
+    }
 
     // 5. Démarrer la mission (activer GPS)
     public function demarrerMission($id_mission)
@@ -213,9 +276,28 @@ public function missionEnCours($id_chauffeur)
         $mission->date_fin = now();
         $mission->save();
 
+        // ✅ LIBÉRER LE CAMION
+        if ($mission->camion) {
+            $mission->camion->statut = 'disponible';
+            $mission->camion->save();
+        }
+
+        // ✅ VÉRIFIER S'IL Y A D'AUTRES MISSIONS PLANIFIÉES
+        $prochaineMission = Mission::where('id_chauffeur', $mission->id_chauffeur)
+            ->where('statut', 'planifiee')
+            ->first();
+
         return response()->json([
-            'message' => 'Mission terminée avec succès',
-            'mission' => $mission
+            'message' => 'Mission terminée avec succès. Vous êtes maintenant disponible.',
+            'mission' => $mission,
+            'a_prochaine_mission' => $prochaineMission ? true : false,
+            'prochaine_mission' => $prochaineMission ? [
+                'id_mission' => $prochaineMission->id_mission,
+                'statut' => $prochaineMission->statut
+            ] : null,
+            'missions_disponibles' => Mission::where('id_chauffeur', $mission->id_chauffeur)
+                ->where('statut', 'planifiee')
+                ->count()
         ]);
     }
 
@@ -224,28 +306,28 @@ public function missionEnCours($id_chauffeur)
     // ==============================================
 
     // 7. Signer le certificat de transport
-  public function signerCertificat(Request $request)
-{
-    $request->validate([
-        'id_mission' => 'required|exists:missions,id_mission',
-        'signature' => 'required|string'
-    ]);
+    public function signerCertificat(Request $request)
+    {
+        $request->validate([
+            'id_mission' => 'required|exists:missions,id_mission',
+            'signature' => 'required|string'
+        ]);
 
-    $mission = Mission::findOrFail($request->id_mission);
-    $certificat = $mission->certificat;
+        $mission = Mission::findOrFail($request->id_mission);
+        $certificat = $mission->certificat;
 
-    if (!$certificat) {
-        return response()->json(['message' => 'Aucun certificat trouvé'], 404);
+        if (!$certificat) {
+            return response()->json(['message' => 'Aucun certificat trouvé'], 404);
+        }
+
+        $certificat->signature_chauffeur = $request->signature;
+        $certificat->save();
+
+        return response()->json([
+            'message' => 'Certificat signé avec succès',
+            'certificat' => $certificat
+        ]);
     }
-
-    $certificat->signature_chauffeur = $request->signature;
-    $certificat->save();
-
-    return response()->json([
-        'message' => 'Certificat signé avec succès',
-        'certificat' => $certificat
-    ]);
-}
 
     // ==============================================
     // 🔹 GESTION DES LIVRAISONS
@@ -265,17 +347,14 @@ public function missionEnCours($id_chauffeur)
 
         $livraison = Livraison::findOrFail($request->id_livraison);
 
-        // Vérifier le code
         if ($livraison->code_validation !== $request->code_validation) {
             return response()->json(['message' => 'Code de validation incorrect'], 400);
         }
 
-        // Vérifier que la livraison n'est pas déjà validée
         if ($livraison->statut === 'validee') {
             return response()->json(['message' => 'Livraison déjà validée'], 400);
         }
 
-        // Enregistrer la livraison
         $livraison->quantite_livree = $request->quantite_livree;
         $livraison->date_livraison = now();
         $livraison->signature_gerant = $request->signature_gerant;
@@ -288,7 +367,6 @@ public function missionEnCours($id_chauffeur)
 
         $livraison->save();
 
-        // Mettre à jour le stock de la station
         $stock = \App\Models\Stock::where('id_station', $livraison->id_station)
             ->where('type_carburant', $livraison->mission->bon->type_carburant)
             ->first();
@@ -358,7 +436,6 @@ public function missionEnCours($id_chauffeur)
         $chauffeur = Chauffeur::findOrFail($request->id_chauffeur);
         $mission = $chauffeur->mission_en_cours;
 
-        // Créer une alerte pour l'ICR
         $alerte = Alerte::create([
             'type' => 'incident_chauffeur',
             'message' => "Incident ({$request->type}): {$request->message}",
@@ -369,7 +446,6 @@ public function missionEnCours($id_chauffeur)
             'id_mission' => $mission ? $mission->id_mission : null
         ]);
 
-        // Si c'est une panne, marquer le camion comme en panne
         if ($request->type === 'panne' && $chauffeur->camion) {
             $chauffeur->camion->statut = 'en_panne';
             $chauffeur->camion->save();
@@ -385,7 +461,7 @@ public function missionEnCours($id_chauffeur)
     // 🔹 INFORMATIONS DE MISSION
     // ==============================================
 
-    // 12. Voir le détail de la mission (itinéraire, quantités)
+    // 12. Voir le détail de la mission
     public function detailsMission($id_mission)
     {
         $mission = Mission::with([
@@ -394,9 +470,6 @@ public function missionEnCours($id_chauffeur)
             'chauffeur.user',
             'camion'
         ])->findOrFail($id_mission);
-
-        // Vérifier que le chauffeur est bien celui de la mission
-        // (à faire avec l'authentification)
 
         $details = [
             'mission' => [
@@ -435,7 +508,7 @@ public function missionEnCours($id_chauffeur)
     }
 
     // ==============================================
-    // 🔹 PROFIL (suite)
+    // 🔹 PROFIL
     // ==============================================
 
     // 13. Modifier le profil
@@ -481,7 +554,10 @@ public function missionEnCours($id_chauffeur)
                     'progression' => $missionEnCours->livraisons()->where('statut', 'validee')->count() . '/' . $missionEnCours->livraisons()->count()
                 ] : null,
                 'missions_terminees' => $missionsTerminees,
-                'livraisons_effectuees' => $livraisonsEffectuees
+                'livraisons_effectuees' => $livraisonsEffectuees,
+                'missions_disponibles' => Mission::where('id_chauffeur', $id_chauffeur)
+                    ->where('statut', 'planifiee')
+                    ->count()
             ],
             'camion' => $chauffeur->camion ? [
                 'immatriculation' => $chauffeur->camion->immatriculation,

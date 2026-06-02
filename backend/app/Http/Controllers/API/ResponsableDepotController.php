@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Models\Bon;
 use App\Models\Depot;
 use App\Models\Stock;
+use App\Models\Notification;  // ← C'est comme ça qu'il faut écrire
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 
@@ -524,6 +525,106 @@ public function updateSeuilAlerte(Request $request, $id_responsable)
     } catch (\Exception $e) {
         return response()->json(['message' => 'Erreur: ' . $e->getMessage()], 500);
     }
+}
+
+
+// ==============================================
+// 🔹 NOTIFICATIONS POUR RESPONSABLE DÉPÔT
+// ==============================================
+
+/**
+ * Récupérer toutes les notifications du responsable
+ */
+public function getNotifications(Request $request)
+{
+    $user = auth()->user();
+    
+    $query = Notification::where('id_destinataire', $user->id_utilisateur);
+    
+    if ($request->has('lu')) {
+        $query->where('lu', $request->boolean('lu'));
+    }
+    
+    $notifications = $query->orderBy('created_at', 'desc')
+        ->paginate($request->get('per_page', 20));
+    
+    return response()->json([
+        'notifications' => $notifications,
+        'non_lues' => Notification::where('id_destinataire', $user->id_utilisateur)
+            ->where('lu', false)
+            ->count(),
+        'total' => Notification::where('id_destinataire', $user->id_utilisateur)->count()
+    ]);
+}
+
+/**
+ * Récupérer uniquement les notifications non lues
+ */
+public function getNotificationsNonLues()
+{
+    $user = auth()->user();
+    
+    $notifications = Notification::where('id_destinataire', $user->id_utilisateur)
+        ->where('lu', false)
+        ->orderBy('created_at', 'desc')
+        ->get();
+    
+    return response()->json([
+        'notifications' => $notifications,
+        'count' => $notifications->count()
+    ]);
+}
+
+/**
+ * Statistiques des notifications
+ */
+public function getNotificationsStatistiques()
+{
+    $user = auth()->user();
+    
+    $stats = [
+        'total' => Notification::where('id_destinataire', $user->id_utilisateur)->count(),
+        'non_lues' => Notification::where('id_destinataire', $user->id_utilisateur)->where('lu', false)->count(),
+        'lues' => Notification::where('id_destinataire', $user->id_utilisateur)->where('lu', true)->count()
+    ];
+    
+    return response()->json($stats);
+}
+
+/**
+ * Marquer une notification comme lue
+ */
+public function marquerNotificationLue($id)
+{
+    $user = auth()->user();
+    
+    $notification = Notification::where('id_destinataire', $user->id_utilisateur)
+        ->where('id_notification', $id)
+        ->firstOrFail();
+    
+    $notification->lu = true;
+    $notification->save();
+    
+    return response()->json([
+        'message' => 'Notification marquée comme lue',
+        'notification' => $notification
+    ]);
+}
+
+/**
+ * Marquer toutes les notifications comme lues
+ */
+public function marquerToutesNotificationsLues()
+{
+    $user = auth()->user();
+    
+    $count = Notification::where('id_destinataire', $user->id_utilisateur)
+        ->where('lu', false)
+        ->update(['lu' => true]);
+    
+    return response()->json([
+        'message' => $count . ' notification(s) marquée(s) comme lue(s)'
+    ]);
 }
 }
 
