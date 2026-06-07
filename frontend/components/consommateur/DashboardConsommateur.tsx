@@ -20,6 +20,7 @@ type User = {
   prenom: string;
   email: string;
   telephone: string;
+  motdepass: string;
 };
 
 type Station = {
@@ -94,6 +95,8 @@ export default function DashboardConsommateur() {
     nom: "",
     prenom: "",
     telephone: "",
+    motdepass: "",
+
   });
   
   // Position GPS pour carte
@@ -147,6 +150,7 @@ export default function DashboardConsommateur() {
         nom: res.user?.nom || "",
         prenom: res.user?.prenom || "",
         telephone: res.user?.telephone || "",
+        motdepass: res.user?.motdepass || "",
       });
     } catch (err) {
       console.error("Erreur chargement profil", err);
@@ -719,6 +723,16 @@ export default function DashboardConsommateur() {
                   onChange={(e) => setProfilForm({...profilForm, telephone: e.target.value})}
                 />
               </div>
+               <div>
+  <label className="block text-sm text-gray-400 mb-1">Mot de passe</label>
+  <input
+    type="password"
+    className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white"
+    value={profilForm.motdepass}
+    onChange={(e) => setProfilForm({ ...profilForm, motdepass: e.target.value })}
+  />
+</div>
+
               <button
                 type="submit"
                 disabled={loading}
