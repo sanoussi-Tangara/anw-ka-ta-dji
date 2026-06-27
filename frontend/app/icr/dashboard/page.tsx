@@ -3,7 +3,12 @@
 
 import DashboardIcr from "@/components/icr/DashboardICR ";
 import DashboardFournisseur from "../../../components/fournisseur/DashboardFournisseur";
+import DashboardLayout from "@/components/layout/DashboardLayout";
 
 export default function ICRDashboardPage() {
-  return <DashboardIcr />;
+  return (
+          <DashboardLayout>
+            <DashboardIcr/>
+          </DashboardLayout>
+        );
 }

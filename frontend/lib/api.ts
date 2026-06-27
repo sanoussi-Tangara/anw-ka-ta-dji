@@ -116,7 +116,7 @@ export async function logout(): Promise<void> {
   } finally {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
-    window.location.href = '/login';
+    window.location.href = '/';//je peux mettre login pour que ça me redirige sur la page login
   }
 }
 
@@ -1106,7 +1106,6 @@ export const creerReservation = async (data: {
   id_station: number;
   type_carburant: 'essence' | 'gasoil';
   quantite: number;
-  mode_paiement: 'orange_money' | 'mobicash' | 'wave' | 'card' | 'especes';
   date_retrait?: string;
 }) => {
   return apiPost('/reservations', data, true);

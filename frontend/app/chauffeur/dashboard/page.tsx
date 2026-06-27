@@ -4,7 +4,12 @@
 import DashboardIcr from "@/components/icr/DashboardICR ";
 import DashboardFournisseur from "../../../components/fournisseur/DashboardFournisseur";
 import DashboardChauffeur from "@/components/chauffeur/DashboardChauffeur";
+import DashboardLayout from "@/app/(dashboard)/layout";
 
 export default function ChauffeurDashboardPage() {
-  return <DashboardChauffeur />;
+   return (
+      <DashboardLayout>
+        <DashboardChauffeur />
+      </DashboardLayout>
+    );
 }

@@ -4,7 +4,12 @@
 import DashboardIcr from "@/components/icr/DashboardICR ";
 import DashboardFournisseur from "../../../components/fournisseur/DashboardFournisseur";
 import DashboardGerant from "@/components/gerant/DashboardGerant";
+import DashboardLayout from "@/app/(dashboard)/layout";
 
 export default function gerantDashboardPage() {
-  return <DashboardGerant />;
+  return (
+          <DashboardLayout>
+            <DashboardGerant />
+          </DashboardLayout>
+        );
 }
