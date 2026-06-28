@@ -1112,7 +1112,7 @@ export const creerReservation = async (data: {
 };
 
 export const annulerReservation = async (id: number) => {
-  return apiPut(`/reservations/${id}/annuler`, {}, true);
+  return apiPut(`/reservation/${id}/annuler`, {}, true);
 };
 
 // ------------------------------------------------------------------
