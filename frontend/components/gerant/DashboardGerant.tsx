@@ -11,6 +11,7 @@ import {
   getMesAlertes,
   getMonGerantDashboard,
   creerPompiste,
+  modifierPompiste,
   desactiverPompiste,
   activerPompiste,
   validerMaReception,
@@ -128,6 +129,7 @@ export default function DashboardGerant() {
   
   // États modaux
   const [showPompisteModal, setShowPompisteModal] = useState(false);
+  const [showEditPompisteModal, setShowEditPompisteModal] = useState(false);
   const [showReceptionModal, setShowReceptionModal] = useState(false);
   const [selectedLivraison, setSelectedLivraison] = useState<Livraison | null>(null);
   const [codeValidation, setCodeValidation] = useState("");
@@ -138,6 +140,21 @@ export default function DashboardGerant() {
   const [showSeuilModal, setShowSeuilModal] = useState(false);
   const [selectedStock, setSelectedStock] = useState<Stock | null>(null);
   const [nouveauSeuil, setNouveauSeuil] = useState(0);
+  
+  // États pour la modification du pompiste
+  const [editPompiste, setEditPompiste] = useState<{
+    id: number | null;
+    nom: string;
+    prenom: string;
+    email: string;
+    telephone: string;
+  }>({
+    id: null,
+    nom: "",
+    prenom: "",
+    email: "",
+    telephone: "",
+  });
   
   // Formulaire pompiste
   const [pompisteForm, setPompisteForm] = useState({
@@ -348,6 +365,8 @@ export default function DashboardGerant() {
   };
   
   // ========== GESTION POMPISTES ==========
+  
+  // Créer un pompiste
   const handleCreatePompiste = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -368,6 +387,40 @@ export default function DashboardGerant() {
     }
   };
   
+  // ✅ Ouvrir le modal de modification
+  const openEditPompiste = (pompiste: Pompiste) => {
+    setEditPompiste({
+      id: pompiste.id_pompiste,
+      nom: pompiste.user?.nom || "",
+      prenom: pompiste.user?.prenom || "",
+      email: pompiste.user?.email || "",
+      telephone: pompiste.user?.telephone || "",
+    });
+    setShowEditPompisteModal(true);
+  };
+  
+  // ✅ Modifier un pompiste
+  const handleEditPompiste = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editPompiste.id) return;
+    setLoading(true);
+    try {
+      await modifierPompiste(editPompiste.id, {
+        nom: editPompiste.nom,
+        prenom: editPompiste.prenom,
+        telephone: editPompiste.telephone,
+      });
+      showMessage("✅ Pompiste modifié avec succès");
+      setShowEditPompisteModal(false);
+      await fetchPompistes();
+    } catch (err: any) {
+      showMessage(err.message, true);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Activer/Désactiver un pompiste
   const handleTogglePompisteStatus = async (pompiste: Pompiste) => {
     setLoading(true);
     try {
@@ -477,24 +530,24 @@ export default function DashboardGerant() {
   };
   
   // ========== GESTION NOTIFICATIONS ==========
- const handleMarquerNotificationLue = async (id: number, lien: string) => {
-  try {
-    await marquerNotificationGerantLue(id);
-    await fetchNotifications();
-    if (lien) window.location.href = lien;
-  } catch (err) {
-    console.error("Erreur", err);
-  }
-};
+  const handleMarquerNotificationLue = async (id: number, lien: string) => {
+    try {
+      await marquerNotificationGerantLue(id);
+      await fetchNotifications();
+      if (lien) window.location.href = lien;
+    } catch (err) {
+      console.error("Erreur", err);
+    }
+  };
 
-const handleMarquerToutesNotificationsLues = async () => {
-  try {
-    await marquerToutesNotificationsGerantLues();
-    await fetchNotifications();
-  } catch (err) {
-    console.error("Erreur", err);
-  }
-};
+  const handleMarquerToutesNotificationsLues = async () => {
+    try {
+      await marquerToutesNotificationsGerantLues();
+      await fetchNotifications();
+    } catch (err) {
+      console.error("Erreur", err);
+    }
+  };
   
   // Vérifier les alertes de stock
   const alertesStock = stocks.filter(s => s.quantite <= (s.seuil_alerte || 5000));
@@ -836,7 +889,7 @@ const handleMarquerToutesNotificationsLues = async () => {
           </div>
         )}
         
-        {/* POMPISTES */}
+        {/* POMPISTES - AVEC MODIFICATION */}
         {activeTab === "pompistes" && (
           <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
             <div className="flex justify-between items-center mb-4">
@@ -860,12 +913,21 @@ const handleMarquerToutesNotificationsLues = async () => {
                         <p className="text-sm text-gray-400">{pompiste.user?.email}</p>
                         <p className="text-sm text-gray-400">📞 {pompiste.user?.telephone}</p>
                       </div>
-                      <button
-                        onClick={() => handleTogglePompisteStatus(pompiste)}
-                        className={`px-2 py-1 rounded-full text-xs ${pompiste.user?.statut ? "bg-green-500/20 text-green-300" : "bg-red-500/20 text-red-300"}`}
-                      >
-                        {pompiste.user?.statut ? "Actif" : "Inactif"}
-                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleTogglePompisteStatus(pompiste)}
+                          className={`px-2 py-1 rounded-full text-xs ${pompiste.user?.statut ? "bg-green-500/20 text-green-300" : "bg-red-500/20 text-red-300"}`}
+                        >
+                          {pompiste.user?.statut ? "Actif" : "Inactif"}
+                        </button>
+                        {/* ✅ BOUTON MODIFIER */}
+                        <button
+                          onClick={() => openEditPompiste(pompiste)}
+                          className="px-2 py-1 rounded-full text-xs bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 transition"
+                        >
+                          ✏️ Modifier
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))
@@ -1011,6 +1073,50 @@ const handleMarquerToutesNotificationsLues = async () => {
               <button type="submit" disabled={loading} className="w-full bg-gradient-to-r from-orange-500 to-green-500 text-black font-semibold py-3 rounded-lg">
                 {loading ? "Création..." : "Créer le pompiste"}
               </button>
+            </form>
+          </div>
+        </div>
+      )}
+      
+      {/* ✅ MODAL MODIFICATION POMPISTE */}
+      {showEditPompisteModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-gradient-to-br from-gray-900 to-black border border-orange-500/30 rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-orange-400">✏️ Modifier le pompiste</h2>
+              <button onClick={() => setShowEditPompisteModal(false)} className="text-gray-400 hover:text-white text-2xl">✕</button>
+            </div>
+            <form onSubmit={handleEditPompiste} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Nom</label>
+                  <input type="text" className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white" 
+                    value={editPompiste.nom} onChange={(e) => setEditPompiste({...editPompiste, nom: e.target.value})} required />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Prénom</label>
+                  <input type="text" className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white" 
+                    value={editPompiste.prenom} onChange={(e) => setEditPompiste({...editPompiste, prenom: e.target.value})} required />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Email</label>
+                <input type="email" className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white" 
+                  value={editPompiste.email} onChange={(e) => setEditPompiste({...editPompiste, email: e.target.value})} />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Téléphone</label>
+                <input type="tel" className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white" 
+                  value={editPompiste.telephone} onChange={(e) => setEditPompiste({...editPompiste, telephone: e.target.value})} />
+              </div>
+              <div className="flex gap-3">
+                <button type="submit" disabled={loading} className="flex-1 bg-gradient-to-r from-orange-500 to-green-500 text-black font-semibold py-3 rounded-lg">
+                  {loading ? "Modification..." : "✅ Modifier"}
+                </button>
+                <button type="button" onClick={() => setShowEditPompisteModal(false)} className="flex-1 bg-white/10 py-3 rounded-lg hover:bg-white/20 transition">
+                  Annuler
+                </button>
+              </div>
             </form>
           </div>
         </div>

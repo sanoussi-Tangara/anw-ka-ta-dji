@@ -44,6 +44,7 @@ type Vente = {
   montant_total: number;
   mode_paiement: string;
   date_vente: string;
+  prix_unitaire?: number;
 };
 
 type Reservation = {
@@ -139,11 +140,9 @@ export default function DashboardPompiste() {
   const [cloture, setCloture] = useState<ClotureCaisse | null>(null);
   const [prix, setPrix] = useState<Prix>({ essence: 750, gasoil: 700 });
   
-  const [venteForm, setVenteForm] = useState({
-    type_carburant: "essence",
-    quantite: 0,
-    mode_paiement: "especes",
-  });
+  // État pour gérer la session de la journée
+  const [journeeActive, setJourneeActive] = useState(false);
+  const [debutJournee, setDebutJournee] = useState<string | null>(null);
   
   // Calcul des ventes du jour
   const ventesDuJour = useMemo(() => {
@@ -166,6 +165,31 @@ export default function DashboardPompiste() {
     return total;
   }, [ventesDuJour]);
   
+  // Calcul des statistiques par mode de paiement
+  const statsPaiement = useMemo(() => {
+    const stats = {
+      especes: 0,
+      orange_money: 0,
+      mobicash: 0,
+      wave: 0
+    };
+    
+    ventesDuJour.forEach(v => {
+      const mode = v.mode_paiement?.toLowerCase() || '';
+      if (mode.includes('espece') || mode === 'especes') {
+        stats.especes += v.montant_total || v.montant || 0;
+      } else if (mode.includes('orange')) {
+        stats.orange_money += v.montant_total || v.montant || 0;
+      } else if (mode.includes('mobicash')) {
+        stats.mobicash += v.montant_total || v.montant || 0;
+      } else if (mode.includes('wave')) {
+        stats.wave += v.montant_total || v.montant || 0;
+      }
+    });
+    
+    return stats;
+  }, [ventesDuJour]);
+  
   useEffect(() => {
     if (!localStorage.getItem("token")) {
       window.location.href = "/login";
@@ -174,6 +198,14 @@ export default function DashboardPompiste() {
     fetchAllData();
     checkModeHorsLigne();
     fetchPrix();
+    
+    // Vérifier si une journée est déjà active (depuis localStorage)
+    const journee = localStorage.getItem("journee_active");
+    if (journee === "true") {
+      setJourneeActive(true);
+      const debut = localStorage.getItem("debut_journee");
+      if (debut) setDebutJournee(debut);
+    }
   }, []);
   
   const checkModeHorsLigne = () => {
@@ -260,9 +292,11 @@ export default function DashboardPompiste() {
       const ventesFormatees = (res.ventes || []).map((vente: any) => ({
         ...vente,
         montant: toNumber(vente.montant),
-        montant_total: toNumber(vente.montant_total || vente.montant)
+        montant_total: toNumber(vente.montant_total || vente.montant),
+        prix_unitaire: vente.prix_unitaire || (vente.montant_total / vente.quantite)
       }));
       setVentes(ventesFormatees);
+      console.log("Ventes chargées:", ventesFormatees);
     } catch (err) {
       console.error("Erreur chargement ventes", err);
       setVentes([]);
@@ -288,54 +322,49 @@ export default function DashboardPompiste() {
     }, 3000);
   };
   
-  const handleSaisirVente = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (venteForm.quantite <= 0) {
-      showMessage("Veuillez entrer une quantité valide", true);
-      return;
-    }
-    
-    const stock = stocks.find(s => s.type_carburant === venteForm.type_carburant);
-    if (!stock || stock.quantite < venteForm.quantite) {
-      showMessage("Stock insuffisant", true);
-      return;
-    }
-    
+  // ========== GESTION DE LA JOURNÉE ==========
+  
+  const handleCommencerJournee = () => {
+    const maintenant = new Date();
+    setJourneeActive(true);
+    setDebutJournee(maintenant.toLocaleString());
+    localStorage.setItem("journee_active", "true");
+    localStorage.setItem("debut_journee", maintenant.toLocaleString());
+    showMessage(`✅ Journée commencée à ${maintenant.toLocaleString()}`);
+  };
+  
+  const handleTerminerJournee = async () => {
     setLoading(true);
     try {
-      if (modeHorsLigne) {
-        const ventesExistantes = JSON.parse(localStorage.getItem("ventes_hors_ligne") || "[]");
-        ventesExistantes.push({
-          type_carburant: venteForm.type_carburant,
-          quantite: venteForm.quantite,
-          mode_paiement: venteForm.mode_paiement,
-          id_pompiste: profil?.id_pompiste,
-          id_station: profil?.station?.id_station,
-          date_vente: new Date().toISOString(),
-        });
-        localStorage.setItem("ventes_hors_ligne", JSON.stringify(ventesExistantes));
-        showMessage("✅ Vente enregistrée en mode hors-ligne");
-      } else {
-        await enregistrerVente({
-          type_carburant: venteForm.type_carburant,
-          quantite: venteForm.quantite,
-          mode_paiement: venteForm.mode_paiement,
-        });
-        showMessage("✅ Vente enregistrée avec succès");
-      }
-      
-      setVenteForm({ type_carburant: "essence", quantite: 0, mode_paiement: "especes" });
-      await Promise.all([fetchStocks(), fetchVentes(), fetchPrix()]);
-      
+      const res = await getPompisteClotureCaisse();
+      setCloture(res);
+      setJourneeActive(false);
+      localStorage.removeItem("journee_active");
+      localStorage.removeItem("debut_journee");
+      showMessage(`✅ Journée terminée. Total encaissé: ${res.total_ventes.toLocaleString()} FCFA`);
     } catch (err: any) {
-      console.error("Erreur lors de la vente:", err);
-      showMessage(err.message || "Erreur lors de l'enregistrement", true);
+      showMessage(err.message, true);
     } finally {
       setLoading(false);
     }
   };
   
+  // ========== SIMULER POMPE (Redirection vers Django) ==========
+  
+  const handleSimulerPompe = () => {
+    if (!profil) {
+      showMessage("Profil non chargé", true);
+      return;
+    }
+    
+    const token = localStorage.getItem("token");
+    
+    const simulationUrl = `http://127.0.0.1:8001/?pompiste_id=${profil.id_pompiste}&nom=${encodeURIComponent(profil.user?.prenom + ' ' + profil.user?.nom)}&station=${encodeURIComponent(profil.station?.nom)}&station_id=${profil.station?.id_station}&token=${token}`;
+    
+    window.open(simulationUrl, '_blank');
+  };
+  
+  // ========== FIN DE JOURNÉE ==========
   const handleClotureCaisse = async () => {
     setLoading(true);
     try {
@@ -348,6 +377,7 @@ export default function DashboardPompiste() {
     }
   };
   
+  // ========== RÉSERVATIONS ==========
   const handleServirReservation = async (id_reservation: number) => {
     setLoading(true);
     try {
@@ -361,8 +391,6 @@ export default function DashboardPompiste() {
       setLoading(false);
     }
   };
-  
-  const montantVente = venteForm.quantite * (venteForm.type_carburant === 'essence' ? prix.essence : prix.gasoil);
   
   if (!profil) {
     return (
@@ -388,6 +416,11 @@ export default function DashboardPompiste() {
               <p className="text-gray-400 text-sm mt-1">
                 {profil.user?.prenom} {profil.user?.nom}
               </p>
+              {journeeActive && debutJournee && (
+                <p className="text-xs text-green-400 mt-1">
+                  ✅ Journée commencée à {debutJournee}
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-3">
               <div className="text-right text-sm hidden md:block">
@@ -428,10 +461,9 @@ export default function DashboardPompiste() {
         <div className="flex gap-3 flex-wrap">
           {[
             ["dashboard", "🏠 Tableau de bord"],
-            ["vente", "💰 Nouvelle vente"],
             ["reservations", "📅 Réservations"],
             ["historique", "📜 Historique"],
-            ["cloture", "📊 Fin de journée"],
+            ["cloture", "📊 Détails des ventes de la journeé"],
           ].map(([key, label]) => (
             <button
               key={key}
@@ -459,6 +491,38 @@ export default function DashboardPompiste() {
               <p className="text-orange-400 font-bold">⛽ {prix.essence} FCFA/L | 🛢️ {prix.gasoil} FCFA/L</p>
             </div>
             
+            {/* Gestion de la journée */}
+            <div className="bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-2xl p-6 border border-blue-500/30 mb-6">
+              <h3 className="text-lg font-semibold text-blue-400 mb-3">📋 Gestion de la journée</h3>
+              <div className="flex flex-wrap gap-3">
+                {!journeeActive ? (
+                  <button
+                    onClick={handleCommencerJournee}
+                    className="px-6 py-3 rounded-xl bg-green-500 text-black font-semibold hover:bg-green-600 transition"
+                  >
+                    🚀 COMMENCER LA JOURNÉE
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={handleSimulerPompe}
+                      className="px-6 py-3 rounded-xl bg-gradient-to-r from-orange-500 to-yellow-500 text-black font-semibold hover:shadow-lg transition"
+                    >
+                      🛢️ SIMULER POMPE
+                    </button>
+                    <button
+                      onClick={handleTerminerJournee}
+                      disabled={loading}
+                      className="px-6 py-3 rounded-xl bg-red-500 text-white font-semibold hover:bg-red-600 transition disabled:opacity-50"
+                    >
+                      ⏹️ TERMINER LA JOURNÉE
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+            
+            {/* Stocks */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
               {stocks.map((stock) => {
                 const capaciteMax = 50000;
@@ -485,7 +549,7 @@ export default function DashboardPompiste() {
               })}
             </div>
             
-            {/* Ventes du jour */}
+            {/* Ventes du jour avec détails */}
             <div className="bg-white/5 rounded-2xl p-6 border border-white/10">
               <h3 className="text-xl font-bold text-orange-400 mb-4">
                 💰 Ventes du {new Date().toLocaleDateString('fr-FR')}
@@ -502,94 +566,31 @@ export default function DashboardPompiste() {
                   </p>
                 </div>
               </div>
-            </div>
-          </div>
-        )}
-        
-        {/* VENTE */}
-        {activeTab === "vente" && (
-          <div className="max-w-2xl mx-auto">
-            <div className="bg-white/5 rounded-2xl p-8 border border-white/10">
-              <h2 className="text-2xl font-bold text-orange-400 text-center mb-6">💰 Nouvelle vente</h2>
               
-              <div className="bg-blue-500/10 rounded-xl p-3 mb-6 text-center">
-                <p className="text-sm text-gray-400">Prix unitaire en vigueur</p>
-                <p className="text-xl font-bold text-blue-400">
-                  {venteForm.type_carburant === 'essence' ? prix.essence : prix.gasoil} FCFA/L
-                </p>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4 mb-6">
-                <button
-                  type="button"
-                  onClick={() => setVenteForm({...venteForm, type_carburant: "essence"})}
-                  className={`py-6 rounded-xl text-2xl font-bold transition ${
-                    venteForm.type_carburant === "essence"
-                      ? "bg-gradient-to-r from-orange-500 to-yellow-500 text-black"
-                      : "bg-white/10 text-white hover:bg-white/20"
-                  }`}
-                >
-                  ⛽ Essence
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setVenteForm({...venteForm, type_carburant: "gasoil"})}
-                  className={`py-6 rounded-xl text-2xl font-bold transition ${
-                    venteForm.type_carburant === "gasoil"
-                      ? "bg-gradient-to-r from-orange-500 to-yellow-500 text-black"
-                      : "bg-white/10 text-white hover:bg-white/20"
-                  }`}
-                >
-                  🛢️ Gasoil
-                </button>
-              </div>
-              
-              <div className="mb-6">
-                <label className="block text-gray-400 text-center mb-2">Quantité (Litres)</label>
-                <input
-                  type="number"
-                  value={venteForm.quantite || ""}
-                  onChange={(e) => setVenteForm({...venteForm, quantite: parseFloat(e.target.value) || 0})}
-                  className="w-full p-4 text-center text-3xl rounded-xl bg-black/50 border border-white/10 text-white"
-                  placeholder="0"
-                  autoFocus
-                />
-              </div>
-              
-              <div className="grid grid-cols-2 gap-3 mb-6">
-                {[
-                  ["especes", "💵 Espèces"],
-                  ["orange_money", "📱 Orange Money"],
-                  ["mobicash", "📱 Mobicash"],
-                  ["wave", "📱 Wave"],
-                ].map(([value, label]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setVenteForm({...venteForm, mode_paiement: value})}
-                    className={`py-3 rounded-lg text-sm font-medium transition ${
-                      venteForm.mode_paiement === value
-                        ? "bg-green-500 text-white"
-                        : "bg-white/10 text-gray-300 hover:bg-white/20"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              
-              <div className="bg-orange-500/20 rounded-xl p-4 mb-6 text-center">
-                <p className="text-gray-400">Montant à encaisser</p>
-                <p className="text-3xl font-bold text-orange-400">{montantVente.toLocaleString()} FCFA</p>
-              </div>
-              
-              <button
-                onClick={handleSaisirVente}
-                disabled={loading || venteForm.quantite <= 0}
-                className="w-full py-4 rounded-xl bg-gradient-to-r from-green-500 to-emerald-600 text-white text-xl font-bold disabled:opacity-50"
-              >
-                {loading ? "Enregistrement..." : "✅ VALIDER LA VENTE"}
-              </button>
+              {/* Détail par mode de paiement */}
+              {ventesDuJour.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-white/10">
+                  <p className="text-gray-400 text-sm mb-2">Détail par mode de paiement :</p>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div className="flex justify-between p-2 bg-white/5 rounded">
+                      <span>💵 Espèces</span>
+                      <span className="text-green-400">{statsPaiement.especes.toLocaleString()} FCFA</span>
+                    </div>
+                    <div className="flex justify-between p-2 bg-white/5 rounded">
+                      <span>📱 Orange Money</span>
+                      <span className="text-green-400">{statsPaiement.orange_money.toLocaleString()} FCFA</span>
+                    </div>
+                    <div className="flex justify-between p-2 bg-white/5 rounded">
+                      <span>📱 Mobicash</span>
+                      <span className="text-green-400">{statsPaiement.mobicash.toLocaleString()} FCFA</span>
+                    </div>
+                    <div className="flex justify-between p-2 bg-white/5 rounded">
+                      <span>🌊 Wave</span>
+                      <span className="text-green-400">{statsPaiement.wave.toLocaleString()} FCFA</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -641,29 +642,58 @@ export default function DashboardPompiste() {
           </div>
         )}
         
-        {/* HISTORIQUE */}
+        {/* HISTORIQUE AVEC DÉTAILS */}
         {activeTab === "historique" && (
           <div className="bg-white/5 rounded-2xl p-6 border border-white/10">
             <h2 className="text-xl font-bold text-orange-400 mb-4">📜 Historique des ventes</h2>
-            <div className="space-y-2 max-h-96 overflow-y-auto">
+            <div className="space-y-2 max-h-[500px] overflow-y-auto">
               {ventes.length === 0 ? (
                 <div className="text-center text-gray-400 py-8">Aucune vente</div>
               ) : (
                 ventes.map((vente) => {
                   const montant = vente.montant_total || vente.montant || 0;
+                  const prixUnitaire = vente.prix_unitaire || (montant / vente.quantite);
+                  const date = new Date(vente.date_vente);
+                  const dateStr = date.toLocaleDateString('fr-FR');
+                  const heureStr = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+                  
+                  // Icône pour le mode de paiement
+                  const getPaiementIcon = (mode: string) => {
+                    const m = mode?.toLowerCase() || '';
+                    if (m.includes('espece')) return '💵';
+                    if (m.includes('orange')) return '📱';
+                    if (m.includes('mobicash')) return '📱';
+                    if (m.includes('wave')) return '🌊';
+                    return '💳';
+                  };
+                  
                   return (
-                    <div key={vente.id_vente} className="p-3 bg-white/5 rounded-lg">
+                    <div key={vente.id_vente} className="p-4 bg-white/5 rounded-lg border border-white/10 hover:border-orange-500/30 transition">
                       <div className="flex justify-between items-center flex-wrap gap-2">
-                        <div>
-                          <p className="font-semibold">
-                            {vente.type_carburant === 'essence' ? '⛽ Essence' : '🛢️ Gasoil'} - {vente.quantite} L
-                          </p>
-                          <p className="text-sm text-gray-400">{vente.mode_paiement}</p>
-                          <p className="text-xs text-gray-500">{new Date(vente.date_vente).toLocaleString()}</p>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-semibold">
+                              {vente.type_carburant === 'essence' ? '⛽ Essence' : '🛢️ Gasoil'}
+                            </span>
+                            <span className="text-sm text-gray-400">•</span>
+                            <span className="text-sm text-gray-400">{vente.quantite} L</span>
+                            <span className="text-sm text-gray-400">•</span>
+                            <span className="text-sm text-gray-400">{prixUnitaire.toFixed(0)} FCFA/L</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-sm text-gray-400 mt-1">
+                            <span>{getPaiementIcon(vente.mode_paiement)} {vente.mode_paiement}</span>
+                            <span>•</span>
+                            <span>📅 {dateStr}</span>
+                            <span>•</span>
+                            <span>🕐 {heureStr}</span>
+                          </div>
                         </div>
-                        <p className="text-lg font-bold text-green-400">
-                          {typeof montant === 'number' ? montant.toLocaleString() : parseFloat(montant).toLocaleString()} FCFA
-                        </p>
+                        <div className="text-right">
+                          <p className="text-lg font-bold text-green-400">
+                            {typeof montant === 'number' ? montant.toLocaleString() : parseFloat(montant).toLocaleString()} FCFA
+                          </p>
+                          <p className="text-xs text-gray-500">#{vente.id_vente}</p>
+                        </div>
                       </div>
                     </div>
                   );

@@ -32,11 +32,8 @@ type User = {
 
 type Depot = {
   id_depot: number;
-  nom_depot: string;
-  adresse: string;
-  ville: string;
-  latitude?: number;
-  longitude?: number;
+  nom: string;
+  localisation: string;
 };
 
 type Fournisseur = {
@@ -434,7 +431,7 @@ export default function DashboardResponsable() {
                 🏭 Dashboard Responsable de Dépôt
               </h1>
               <p className="text-gray-400 text-sm mt-1">
-                {responsable?.depot?.nom_depot || "Chargement..."} • Gestion des chargements
+                {responsable?.depot?.nom || "Chargement..."} • {responsable?.depot?.localisation || ""}
               </p>
             </div>
             
@@ -583,6 +580,30 @@ export default function DashboardResponsable() {
         
         {activeTab === "dashboard" && (
           <div>
+            {/* ✅ CARTE D'INFORMATION DU DÉPÔT - EN HAUT DU TABLEAU DE BORD */}
+            <div className="bg-gradient-to-r from-orange-500/10 via-green-500/5 to-orange-500/10 border border-orange-500/20 rounded-2xl p-6 mb-8">
+              <div className="flex items-center gap-4">
+                <div className="text-4xl">🏭</div>
+                <div className="flex-1">
+                  <h2 className="text-xl font-bold text-orange-400">
+                    {responsable?.depot?.nom || "Dépôt non défini"}
+                  </h2>
+                  <p className="text-gray-400 flex items-center gap-2">
+                    <span>📍</span> {responsable?.depot?.localisation || "Localisation non définie"}
+                  </p>
+                  <div className="flex items-center gap-4 mt-2 text-sm">
+                    <span className="text-gray-400">Responsable: <span className="text-white font-semibold">{responsable?.user?.prenom} {responsable?.user?.nom}</span></span>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="px-4 py-2 bg-green-500/20 rounded-lg border border-green-500/30">
+                    <p className="text-xs text-gray-400">Statut</p>
+                    <p className="text-sm font-semibold text-green-400">✅ Actif</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
               {[
                 { title: "Bons à traiter", value: stats.bonsEnAttente, color: "from-yellow-500 to-orange-500", icon: "📋" },
@@ -605,6 +626,7 @@ export default function DashboardResponsable() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* ✅ Carte Stock Essence avec nom du dépôt */}
               <div className="bg-gradient-to-br from-orange-500/10 to-green-500/10 border border-orange-500/20 rounded-2xl p-6">
                 <div className="flex justify-between items-center mb-3">
                   <h3 className="text-lg font-semibold">⛽ Stock Essence</h3>
@@ -626,6 +648,8 @@ export default function DashboardResponsable() {
                   + Gérer le stock
                 </button>
               </div>
+
+              {/* ✅ Carte Stock Gasoil avec nom du dépôt */}
               <div className="bg-gradient-to-br from-orange-500/10 to-green-500/10 border border-green-500/20 rounded-2xl p-6">
                 <div className="flex justify-between items-center mb-3">
                   <h3 className="text-lg font-semibold">🛢️ Stock Gasoil</h3>
@@ -690,7 +714,6 @@ export default function DashboardResponsable() {
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-2">
                       <span className="px-3 py-1 rounded-full bg-yellow-500/20 text-yellow-300 text-sm">En attente</span>
-                      <span className="text-xs text-gray-500">#{bon.id_bon}</span>
                     </div>
                     <h3 className="font-bold text-lg">{bon.fournisseur?.nom_societe}</h3>
                     <div className="grid grid-cols-2 gap-4 mt-3 text-sm">
@@ -722,7 +745,6 @@ export default function DashboardResponsable() {
                   <div>
                     <div className="flex items-center gap-3 mb-2">
                       <span className="px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 text-sm animate-pulse">Chargement en cours</span>
-                      <span className="text-xs text-gray-500">#{bon.id_bon}</span>
                     </div>
                     <h3 className="font-bold text-lg">{bon.fournisseur?.nom_societe}</h3>
                     <p className="text-sm text-gray-400 mt-1">{bon.type_carburant} • {bon.quantite_commandee} L</p>
@@ -856,13 +878,47 @@ export default function DashboardResponsable() {
               ))}
             </div>
             
-            <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+            {/* ✅ CARTE DES INFORMATIONS DU DÉPÔT - AMÉLIORÉE */}
+            <div className="bg-gradient-to-br from-orange-500/10 to-green-500/10 border border-orange-500/20 rounded-2xl p-6">
               <h2 className="text-xl font-bold text-orange-400 mb-4">🏭 Informations du dépôt</h2>
-              <div className="space-y-3">
-                <div className="flex justify-between py-2 border-b border-white/10"><span className="text-gray-400">Nom:</span><span className="font-semibold">{responsable?.depot?.nom_depot}</span></div>
-                <div className="flex justify-between py-2 border-b border-white/10"><span className="text-gray-400">Adresse:</span><span>{responsable?.depot?.adresse}</span></div>
-                <div className="flex justify-between py-2 border-b border-white/10"><span className="text-gray-400">Ville:</span><span>{responsable?.depot?.ville}</span></div>
-                <div className="flex justify-between py-2"><span className="text-gray-400">Responsable:</span><span>{responsable?.user?.prenom} {responsable?.user?.nom}</span></div>
+              
+              <div className="bg-white/5 rounded-xl p-4 mb-4">
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="text-3xl">🏛️</span>
+                  <div>
+                    <p className="text-xs text-gray-400">Nom du dépôt</p>
+                    <p className="text-xl font-bold text-white">{responsable?.depot?.nom || "Non défini"}</p>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="bg-white/5 rounded-xl p-4 mb-4">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">📍</span>
+                  <div>
+                    <p className="text-xs text-gray-400">Localisation</p>
+                    <p className="text-lg font-semibold text-orange-400">{responsable?.depot?.localisation || "Non définie"}</p>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-white/5 rounded-xl p-3">
+                  <p className="text-xs text-gray-400">Responsable</p>
+                  <p className="text-sm font-semibold text-white">{responsable?.user?.prenom} {responsable?.user?.nom}</p>
+                </div>
+                <div className="bg-white/5 rounded-xl p-3">
+                  <p className="text-xs text-gray-400">Statut</p>
+                  <p className="text-sm font-semibold text-green-400">✅ Actif</p>
+                </div>
+              </div>
+              
+              <div className="mt-4 pt-4 border-t border-white/10">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
+                  <span className="text-gray-400">Dernière mise à jour:</span>
+                  <span className="text-gray-300">{new Date().toLocaleDateString()}</span>
+                </div>
               </div>
             </div>
           </div>

@@ -15,6 +15,7 @@ import {
   createCamion,
   updateGerant,
   updateChauffeur,
+  updateStation,
   updateCamion,
   desactiverGerant,
   activerGerant,
@@ -25,9 +26,12 @@ import {
   updateIcrProfil,
   getCertificatByMission,
   signerMissionParIcr,  
-  getStatutSignatureCertificat,  // ← Ajoutez ceci
-  downloadCertificatPDF,   // ← Changement ici (au lieu de signerCertificatICR)
-  getPositionMission,  // ← AJOUTEZ CETTE LIGNE
+  getStatutSignatureCertificat,
+  downloadCertificatPDF,
+  getPositionMission,
+  getIncidentsIcr,
+  getIncidentDetail,
+  updateIncidentStatus,
 } from "../../lib/api";
 
 // ================= TYPES =================
@@ -98,11 +102,32 @@ type Mission = {
   bon?: Bon;
   chauffeur?: Chauffeur;
   camion?: Camion;
+  certificat_statut?: string;
 };
 
 type IcrProfile = {
   id_icr: number;
   user?: User;
+};
+
+// ✅ NOUVEAU TYPE INCIDENT
+type Incident = {
+  id_incident: number;
+  type: string;
+  message: string;
+  latitude?: number;
+  longitude?: number;
+  statut: 'en_attente' | 'en_cours' | 'resolu' | 'ignore';
+  date_incident: string;
+  chauffeur?: {
+    id_chauffeur: number;
+    user?: User;
+  };
+  mission?: {
+    id_mission: number;
+    bon?: Bon;
+    camion?: Camion;
+  };
 };
 
 export default function DashboardIcr() {
@@ -120,6 +145,12 @@ export default function DashboardIcr() {
   const [camions, setCamions] = useState<Camion[]>([]);
   const [bonsRecus, setBonsRecus] = useState<Bon[]>([]);
   const [missions, setMissions] = useState<Mission[]>([]);
+  
+  // ✅ État pour les incidents
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [showIncidentModal, setShowIncidentModal] = useState(false);
+  const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
+  const [incidentStatut, setIncidentStatut] = useState('');
 
   // États modaux
   const [showGerantModal, setShowGerantModal] = useState(false);
@@ -134,15 +165,66 @@ export default function DashboardIcr() {
   const [missionToSign, setMissionToSign] = useState<{id_mission: number, certificat_id: number} | null>(null);
   const signatureCanvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
+  
   // États pour la modal certificat
-const [showCertificatModal, setShowCertificatModal] = useState(false);
-const [certificatDetails, setCertificatDetails] = useState<any>(null);
+  const [showCertificatModal, setShowCertificatModal] = useState(false);
+  const [certificatDetails, setCertificatDetails] = useState<any>(null);
 
-// États pour le suivi GPS
-const [showGpsModal, setShowGpsModal] = useState(false);
-const [positionData, setPositionData] = useState<any>(null);
-const [selectedMissionGps, setSelectedMissionGps] = useState<number | null>(null);
-const [rafraichissement, setRafraichissement] = useState(false);
+  // États pour le suivi GPS
+  const [showGpsModal, setShowGpsModal] = useState(false);
+  const [positionData, setPositionData] = useState<any>(null);
+  const [selectedMissionGps, setSelectedMissionGps] = useState<number | null>(null);
+  const [rafraichissement, setRafraichissement] = useState(false);
+
+  // États pour la modification
+  const [showEditGerantModal, setShowEditGerantModal] = useState(false);
+  const [editGerant, setEditGerant] = useState<{
+    id: number | null;
+    nom: string;
+    prenom: string;
+    email: string;
+    telephone: string;
+  }>({
+    id: null,
+    nom: "",
+    prenom: "",
+    email: "",
+    telephone: "",
+  });
+
+  const [showEditChauffeurModal, setShowEditChauffeurModal] = useState(false);
+  const [editChauffeur, setEditChauffeur] = useState<{
+    id: number | null;
+    nom: string;
+    prenom: string;
+    email: string;
+    telephone: string;
+    permis: string;
+  }>({
+    id: null,
+    nom: "",
+    prenom: "",
+    email: "",
+    telephone: "",
+    permis: "",
+  });
+
+  const [showEditStationModal, setShowEditStationModal] = useState(false);
+  const [editStation, setEditStation] = useState<{
+    id: number | null;
+    nom: string;
+    adresse: string;
+    latitude: string;
+    longitude: string;
+    id_gerant: string;
+  }>({
+    id: null,
+    nom: "",
+    adresse: "",
+    latitude: "",
+    longitude: "",
+    id_gerant: "",
+  });
 
   // Formulaires
   const [gerantForm, setGerantForm] = useState({
@@ -195,8 +277,6 @@ const [rafraichissement, setRafraichissement] = useState(false);
       try {
         const user = JSON.parse(localStorage.getItem("user") || "{}");
         const id = user?.specific_id ?? user?.icr?.id_icr ?? null;
-        console.log("=== ICR ID RÉCUPÉRÉ ===");
-        console.log("ID:", id);
         return id;
       } catch {
         return null;
@@ -212,7 +292,6 @@ const [rafraichissement, setRafraichissement] = useState(false);
       return;
     }
     if (icrId) {
-      console.log("Chargement des données pour ICR ID:", icrId);
       fetchAllData();
       fetchProfile();
     }
@@ -228,6 +307,7 @@ const [rafraichissement, setRafraichissement] = useState(false);
         fetchCamions(),
         fetchBonsRecus(),
         fetchMissions(),
+        fetchIncidents(),
       ]);
     } catch (err) {
       showMessage("Erreur de chargement des données", true);
@@ -265,15 +345,6 @@ const [rafraichissement, setRafraichissement] = useState(false);
   const fetchChauffeurs = async () => {
     try {
       const res = await getChauffeurs(icrId!);
-      console.log("=== CHAUFFEURS REÇUS ===");
-      console.log("Réponse complète:", res);
-      console.log("Nombre de chauffeurs:", res.chauffeurs?.length);
-      if (res.chauffeurs && res.chauffeurs.length > 0) {
-        console.log("Premier chauffeur:", res.chauffeurs[0]);
-        console.log("Son ID:", res.chauffeurs[0].id_chauffeur);
-      } else {
-        console.log("Aucun chauffeur trouvé dans la réponse!");
-      }
       setChauffeurs(res.chauffeurs || []);
     } catch (err) {
       console.error("Erreur chargement chauffeurs", err);
@@ -308,27 +379,64 @@ const [rafraichissement, setRafraichissement] = useState(false);
   };
 
   const fetchMissions = async () => {
-  try {
-    const res = await getMissionsIcr(icrId!);
-    const missionsData = res.missions || [];
-    
-    // Pour chaque mission, on va chercher le statut du certificat
-    const missionsAvecCertificat = await Promise.all(
-      missionsData.map(async (mission: Mission) => {
-        try {
-          const certificatStatut = await getStatutSignatureCertificat(mission.id_mission);
-          return { ...mission, certificat_statut: certificatStatut.statut };
-        } catch {
-          return { ...mission, certificat_statut: 'non_cree' };
-        }
-      })
-    );
-    
-    setMissions(missionsAvecCertificat);
-  } catch (err) {
-    console.error("Erreur chargement missions", err);
-  }
-};
+    try {
+      const res = await getMissionsIcr(icrId!);
+      const missionsData = res.missions || [];
+      
+      const missionsAvecCertificat = await Promise.all(
+        missionsData.map(async (mission: Mission) => {
+          try {
+            const certificatStatut = await getStatutSignatureCertificat(mission.id_mission);
+            return { ...mission, certificat_statut: certificatStatut.statut };
+          } catch {
+            return { ...mission, certificat_statut: 'non_cree' };
+          }
+        })
+      );
+      
+      setMissions(missionsAvecCertificat);
+    } catch (err) {
+      console.error("Erreur chargement missions", err);
+    }
+  };
+
+  // ✅ Récupérer les incidents
+  const fetchIncidents = async () => {
+    try {
+      const res = await getIncidentsIcr();
+      setIncidents(res.incidents || []);
+    } catch (err) {
+      console.error("Erreur chargement incidents", err);
+    }
+  };
+
+  // ✅ Ouvrir le modal d'incident
+  const openIncidentDetail = async (id_incident: number) => {
+    try {
+      const res = await getIncidentDetail(id_incident);
+      setSelectedIncident(res);
+      setIncidentStatut(res.statut || 'en_attente');
+      setShowIncidentModal(true);
+    } catch (err) {
+      showMessage("Erreur chargement incident", true);
+    }
+  };
+
+  // ✅ Mettre à jour le statut de l'incident
+  const handleUpdateIncidentStatus = async () => {
+    if (!selectedIncident) return;
+    setLoading(true);
+    try {
+      await updateIncidentStatus(selectedIncident.id_incident, incidentStatut);
+      showMessage("✅ Statut de l'incident mis à jour");
+      setShowIncidentModal(false);
+      await fetchIncidents();
+    } catch (err: any) {
+      showMessage(err.message, true);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const showMessage = (msg: string, isError = false) => {
     setMessage(msg);
@@ -411,44 +519,38 @@ const [rafraichissement, setRafraichissement] = useState(false);
       ctx.lineJoin = 'round';
     }
   };
-const saveSignature = async () => {
-  const canvas = signatureCanvasRef.current;
-  if (!canvas) return;
-  
-  const ctx = canvas.getContext('2d');
-  const pixelData = ctx?.getImageData(0, 0, canvas.width, canvas.height);
-  const isEmpty = pixelData?.data.every(value => value === 255);
-  
-  if (isEmpty) {
-    showMessage("Veuillez signer avant de valider", true);
-    return;
-  }
-  
-  setLoading(true);
-  try {
-    const signatureDataURL = canvas.toDataURL('image/png');
+
+  const saveSignature = async () => {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
     
-    // L'ICR signe
-    // Dans DashboardICR.tsx, remplacez l'appel par :
-
-const result = await signerMissionParIcr(missionToSign?.id_mission!, signatureDataURL);
+    const ctx = canvas.getContext('2d');
+    const pixelData = ctx?.getImageData(0, 0, canvas.width, canvas.height);
+    const isEmpty = pixelData?.data.every(value => value === 255);
     
-showMessage("✅ Signature ICR enregistrée ! Le chauffeur peut maintenant voir la mission dans son dashboard.");
+    if (isEmpty) {
+      showMessage("Veuillez signer avant de valider", true);
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      const signatureDataURL = canvas.toDataURL('image/png');
+      const result = await signerMissionParIcr(missionToSign?.id_mission!, signatureDataURL);
+      
+      showMessage("✅ Signature ICR enregistrée ! Le chauffeur peut maintenant voir la mission dans son dashboard.");
+      setShowSignatureModal(false);
+      setMissionToSign(null);
+      await fetchMissions();
+    } catch (err: any) {
+      showMessage(err.message, true);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-// Fermer la modal ICR
-setShowSignatureModal(false);
-setMissionToSign(null);
+  // ========== GESTION DES GÉRANTS ==========
 
-// Rafraîchir la liste des missions
-await fetchMissions();
-  } catch (err: any) {
-    showMessage(err.message, true);
-  } finally {
-    setLoading(false);
-  }
-};
-
-  // Gestion des gérants
   const handleCreateGerant = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -486,7 +588,40 @@ await fetchMissions();
     }
   };
 
-  // Gestion des chauffeurs
+  // MODIFIER GÉRANT
+  const openEditGerant = (gerant: Gerant) => {
+    setEditGerant({
+      id: gerant.id_gerant,
+      nom: gerant.user?.nom || "",
+      prenom: gerant.user?.prenom || "",
+      email: gerant.user?.email || "",
+      telephone: gerant.user?.telephone || "",
+    });
+    setShowEditGerantModal(true);
+  };
+
+  const handleEditGerant = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editGerant.id) return;
+    setLoading(true);
+    try {
+      await updateGerant(editGerant.id, {
+        nom: editGerant.nom,
+        prenom: editGerant.prenom,
+        telephone: editGerant.telephone,
+      });
+      showMessage("✅ Gérant modifié avec succès");
+      setShowEditGerantModal(false);
+      await fetchGerants();
+    } catch (err: any) {
+      showMessage(err.message, true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ========== GESTION DES CHAUFFEURS ==========
+
   const handleCreateChauffeur = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -524,7 +659,42 @@ await fetchMissions();
     }
   };
 
-  // Gestion des stations
+  // MODIFIER CHAUFFEUR
+  const openEditChauffeur = (chauffeur: Chauffeur) => {
+    setEditChauffeur({
+      id: chauffeur.id_chauffeur,
+      nom: chauffeur.user?.nom || "",
+      prenom: chauffeur.user?.prenom || "",
+      email: chauffeur.user?.email || "",
+      telephone: chauffeur.user?.telephone || "",
+      permis: chauffeur.permis || "",
+    });
+    setShowEditChauffeurModal(true);
+  };
+
+  const handleEditChauffeur = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editChauffeur.id) return;
+    setLoading(true);
+    try {
+      await updateChauffeur(editChauffeur.id, {
+        nom: editChauffeur.nom,
+        prenom: editChauffeur.prenom,
+        telephone: editChauffeur.telephone,
+        permis: editChauffeur.permis,
+      });
+      showMessage("✅ Chauffeur modifié avec succès");
+      setShowEditChauffeurModal(false);
+      await fetchChauffeurs();
+    } catch (err: any) {
+      showMessage(err.message, true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ========== GESTION DES STATIONS ==========
+
   const handleCreateStation = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -554,15 +724,45 @@ await fetchMissions();
     }
   };
 
-  // Gestion des camions
+  // MODIFIER STATION
+  const openEditStation = (station: Station) => {
+    setEditStation({
+      id: station.id_station,
+      nom: station.nom || "",
+      adresse: station.adresse || "",
+      latitude: station.latitude?.toString() || "",
+      longitude: station.longitude?.toString() || "",
+      id_gerant: station.id_gerant?.toString() || "",
+    });
+    setShowEditStationModal(true);
+  };
+
+  const handleEditStation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editStation.id) return;
+    setLoading(true);
+    try {
+      await updateStation(editStation.id, {
+        nom: editStation.nom,
+        adresse: editStation.adresse,
+        latitude: parseFloat(editStation.latitude) || 0,
+        longitude: parseFloat(editStation.longitude) || 0,
+        id_gerant: parseInt(editStation.id_gerant),
+      });
+      showMessage("✅ Station modifiée avec succès");
+      setShowEditStationModal(false);
+      await fetchStations();
+    } catch (err: any) {
+      showMessage(err.message, true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ========== GESTION DES CAMIONS ==========
+
   const handleCreateCamion = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    console.log("=== HANDLE CREATE CAMION ===");
-    console.log("1. icrId:", icrId);
-    console.log("2. camionForm.id_chauffeur:", camionForm.id_chauffeur);
-    console.log("3. Type de id_chauffeur:", typeof camionForm.id_chauffeur);
-    console.log("4. Nombre de chauffeurs dans la liste:", chauffeurs.length);
     
     if (!camionForm.id_chauffeur) {
       showMessage("Veuillez sélectionner un chauffeur", true);
@@ -570,7 +770,6 @@ await fetchMissions();
     }
     
     const idChauffeur = Number(camionForm.id_chauffeur);
-    console.log("5. idChauffeur converti:", idChauffeur);
     
     if (isNaN(idChauffeur)) {
       showMessage("Chauffeur invalide", true);
@@ -586,17 +785,15 @@ await fetchMissions();
         type_carburant: camionForm.type_carburant,
         id_chauffeur: idChauffeur,
       };
-      console.log("6. Données envoyées à l'API:", JSON.stringify(data, null, 2));
       
       const result = await createCamion(data);
-      console.log("7. Réponse API:", result);
       
       showMessage("✅ Camion créé avec succès");
       setShowCamionModal(false);
       setCamionForm({ immatriculation: "", capacite: "", type_carburant: "", id_chauffeur: "" });
       await fetchCamions();
     } catch (err: any) {
-      console.error("8. ERREUR:", err);
+      console.error("ERREUR:", err);
       showMessage(err.message, true);
     } finally {
       setLoading(false);
@@ -616,97 +813,92 @@ await fetchMissions();
     }
   };
 
-  // Gestion des missions
-// Gestion des missions
-const handleOrganiserMission = async () => {
-  if (!selectedBon) return;
+  // ========== GESTION DES MISSIONS ==========
 
-  if (!missionForm.id_chauffeur || !missionForm.id_camion || missionForm.livraisons.length === 0) {
-    showMessage("Veuillez remplir tous les champs", true);
-    return;
-  }
+  const handleOrganiserMission = async () => {
+    if (!selectedBon) return;
 
-  setLoading(true);
-  try {
-    const result = await organiserMission({
-      id_bon: selectedBon.id_bon,
-      id_icr: icrId!,
-      id_chauffeur: parseInt(missionForm.id_chauffeur),
-      id_camion: parseInt(missionForm.id_camion),
-      livraisons: missionForm.livraisons.map(l => ({
-        id_station: parseInt(l.id_station),
-        quantite_prevue: parseFloat(l.quantite_prevue),
-        code_validation: l.code_validation,
-      })),
-    });
-    
-    showMessage("✅ Mission organisée avec succès");
-    setShowMissionModal(false);
-    setSelectedBon(null);
-    setMissionForm({ id_chauffeur: "", id_camion: "", livraisons: [] });
-    await fetchMissions();
-    await fetchBonsRecus();
-    
-    // ✅ Ouvrir la modal de signature directement avec l'ID mission
-    // Pas besoin d'attendre ou de récupérer le certificat
-    const idMission = result?.id_mission || result?.mission?.id_mission;
-
-    if (idMission) {
-      setMissionToSign({
-        id_mission: idMission,
-        certificat_id: 0  // Valeur factice, car on utilise id_mission maintenant
-      });
-      setShowSignatureModal(true);
-    } else {
-      console.error("❌ ID mission introuvable:", result);
-      showMessage("Mission créée, mais ID non trouvé", true);
+    if (!missionForm.id_chauffeur || !missionForm.id_camion || missionForm.livraisons.length === 0) {
+      showMessage("Veuillez remplir tous les champs", true);
+      return;
     }
-    
-  } catch (err: any) {
-    showMessage(err.message, true);
-  } finally {
-    setLoading(false);
-  }
-};
-const handleAnnulerMission = async (id_mission: number) => {
-  setLoading(true);
-  try {
-    await annulerMission(id_mission);
-    showMessage("✅ Mission annulée");
-    await fetchMissions();
-  } catch (err: any) {
-    showMessage(err.message, true);
-  } finally {
-    setLoading(false);
-  }
-};
 
-const voirCertificat = async (id_mission: number) => {
-  try {
-    const response = await getCertificatByMission(id_mission);
-    // La réponse peut être dans différents formats
-    const certificatData = response.certificat || response;
-    const missionData = response.mission || response;
-    
-    console.log("Structure de la réponse:", response); // Pour déboguer
-    
-    setCertificatDetails({
-      certificat: certificatData,
-      mission: missionData,
-      bon: response.bon || null,
-      icr: response.icr || null,
-      chauffeur: response.chauffeur || null,
-      camion: response.camion || null,
-      livraisons: response.livraisons || [],
-      totaux: response.totaux || null,
-      signatures: response.signatures || null
-    });
-    setShowCertificatModal(true);
-  } catch (err) {
-    console.error("Erreur:", err);
-    showMessage("Certificat non trouvé", true);
-  }
-};
+    setLoading(true);
+    try {
+      const result = await organiserMission({
+        id_bon: selectedBon.id_bon,
+        id_icr: icrId!,
+        id_chauffeur: parseInt(missionForm.id_chauffeur),
+        id_camion: parseInt(missionForm.id_camion),
+        livraisons: missionForm.livraisons.map(l => ({
+          id_station: parseInt(l.id_station),
+          quantite_prevue: parseFloat(l.quantite_prevue),
+          code_validation: l.code_validation,
+        })),
+      });
+      
+      showMessage("✅ Mission organisée avec succès");
+      setShowMissionModal(false);
+      setSelectedBon(null);
+      setMissionForm({ id_chauffeur: "", id_camion: "", livraisons: [] });
+      await fetchMissions();
+      await fetchBonsRecus();
+      
+      const idMission = result?.id_mission || result?.mission?.id_mission;
+
+      if (idMission) {
+        setMissionToSign({
+          id_mission: idMission,
+          certificat_id: 0
+        });
+        setShowSignatureModal(true);
+      } else {
+        showMessage("Mission créée, mais ID non trouvé", true);
+      }
+      
+    } catch (err: any) {
+      showMessage(err.message, true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAnnulerMission = async (id_mission: number) => {
+    setLoading(true);
+    try {
+      await annulerMission(id_mission);
+      showMessage("✅ Mission annulée");
+      await fetchMissions();
+    } catch (err: any) {
+      showMessage(err.message, true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const voirCertificat = async (id_mission: number) => {
+    try {
+      const response = await getCertificatByMission(id_mission);
+      const certificatData = response.certificat || response;
+      const missionData = response.mission || response;
+      
+      setCertificatDetails({
+        certificat: certificatData,
+        mission: missionData,
+        bon: response.bon || null,
+        icr: response.icr || null,
+        chauffeur: response.chauffeur || null,
+        camion: response.camion || null,
+        livraisons: response.livraisons || [],
+        totaux: response.totaux || null,
+        signatures: response.signatures || null
+      });
+      setShowCertificatModal(true);
+    } catch (err) {
+      console.error("Erreur:", err);
+      showMessage("Certificat non trouvé", true);
+    }
+  };
 
   const ajouterLivraison = () => {
     setMissionForm({
@@ -734,41 +926,38 @@ const voirCertificat = async (id_mission: number) => {
     nbBonsEnAttente: bonsRecus.filter(b => b.statut === "signe").length,
     nbStations: stations.length,
     nbCamions: camions.length,
+    nbIncidents: incidents.filter(i => i.statut === 'en_attente').length,
   };
 
-
-  // Voir la position du camion
-const voirPositionCamion = async (id_mission: number) => {
-  setSelectedMissionGps(id_mission);
-  setShowGpsModal(true);
-  await chargerPosition(id_mission);
-};
-
-// Charger la position
-const chargerPosition = async (id_mission: number) => {
-  try {
-    const res = await getPositionMission(id_mission);
-    setPositionData(res);
-  } catch (err) {
-    console.error("Erreur", err);
-    setPositionData(null);
-  }
-};
-
-// Rafraîchir automatiquement toutes les 10 secondes
-useEffect(() => {
-  let interval: NodeJS.Timeout;
-  
-  if (showGpsModal && selectedMissionGps && rafraichissement) {
-    interval = setInterval(() => {
-      chargerPosition(selectedMissionGps);
-    }, 10000); // 10 secondes
-  }
-  
-  return () => {
-    if (interval) clearInterval(interval);
+  const voirPositionCamion = async (id_mission: number) => {
+    setSelectedMissionGps(id_mission);
+    setShowGpsModal(true);
+    await chargerPosition(id_mission);
   };
-}, [showGpsModal, selectedMissionGps, rafraichissement]);
+
+  const chargerPosition = async (id_mission: number) => {
+    try {
+      const res = await getPositionMission(id_mission);
+      setPositionData(res);
+    } catch (err) {
+      console.error("Erreur", err);
+      setPositionData(null);
+    }
+  };
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    
+    if (showGpsModal && selectedMissionGps && rafraichissement) {
+      interval = setInterval(() => {
+        chargerPosition(selectedMissionGps);
+      }, 10000);
+    }
+    
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [showGpsModal, selectedMissionGps, rafraichissement]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-black to-gray-900">
@@ -813,7 +1002,7 @@ useEffect(() => {
         </div>
       )}
 
-      {/* TABS */}
+      {/* TABS - AJOUT DE L'ONGLET INCIDENTS */}
       <div className="max-w-7xl mx-auto px-6 mt-6">
         <div className="flex gap-2 flex-wrap border-b border-white/10 pb-3">
           {[
@@ -824,6 +1013,7 @@ useEffect(() => {
             ["camions", "🚚 Camions"],
             ["bons", "📋 Bons reçus"],
             ["missions", "📦 Missions"],
+            ["incidents", `⚠️ Incidents ${stats.nbIncidents > 0 ? `(${stats.nbIncidents})` : ''}`],
           ].map(([key, label]) => (
             <button
               key={key}
@@ -869,28 +1059,33 @@ useEffect(() => {
               ))}
             </div>
 
-            {/* Derniers bons reçus */}
-            <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-              <h3 className="text-lg font-semibold mb-4">📋 Derniers bons reçus</h3>
-              <div className="space-y-2">
-                {bonsRecus.slice(0, 5).map((bon) => (
-                  <div key={bon.id_bon} className="flex justify-between items-center p-3 bg-white/5 rounded-lg">
+            {/* Dernières stations avec gérant */}
+            <div className="mt-8 bg-white/5 border border-white/10 rounded-2xl p-6">
+              <h3 className="text-lg font-semibold mb-4">📍 Dernières stations ajoutées</h3>
+              <div className="space-y-3">
+                {stations.slice(0, 5).map((station) => (
+                  <div key={station.id_station} className="flex justify-between items-center p-3 bg-white/5 rounded-lg">
                     <div>
-                      <p className="font-mono text-sm">Bon #{bon.id_bon}</p>
-                      <p className="text-xs text-gray-400">{bon.type_carburant} • {bon.quantite_commandee} L</p>
+                      <p className="font-semibold">{station.nom}</p>
+                      <p className="text-xs text-gray-400">{station.adresse}</p>
                     </div>
-                    <span className="px-2 py-1 rounded-full text-xs bg-yellow-500/20 text-yellow-300">En attente</span>
+                    <div className="text-right">
+                      <p className="text-xs text-orange-400">
+                        👨‍💼 {station.gerant?.user?.prenom} {station.gerant?.user?.nom}
+                      </p>
+                      <p className="text-xs text-gray-500">📞 {station.gerant?.user?.telephone || "N/A"}</p>
+                    </div>
                   </div>
                 ))}
-                {bonsRecus.length === 0 && (
-                  <p className="text-center text-gray-400 py-4">Aucun bon reçu</p>
+                {stations.length === 0 && (
+                  <p className="text-center text-gray-400 py-4">Aucune station enregistrée</p>
                 )}
               </div>
             </div>
           </div>
         )}
 
-        {/* STATIONS */}
+        {/* STATIONS - AVEC MODIFICATION */}
         {activeTab === "stations" && (
           <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
             <div className="flex justify-between items-center mb-4">
@@ -910,8 +1105,20 @@ useEffect(() => {
                   {station.latitude && station.longitude && (
                     <p className="text-xs text-gray-500 mt-2">📍 {station.latitude}, {station.longitude}</p>
                   )}
-                  <p className="text-xs text-orange-400 mt-1">👨‍💼 Gérant: {station.gerant?.user?.prenom} {station.gerant?.user?.nom}</p>
+                  <div className="mt-3 p-2 bg-orange-500/10 rounded-lg border border-orange-500/20">
+                    <p className="text-xs text-gray-400">👨‍💼 Gérant</p>
+                    <p className="text-sm font-semibold text-orange-300">
+                      {station.gerant?.user?.prenom} {station.gerant?.user?.nom}
+                    </p>
+                    <p className="text-xs text-gray-400">📞 {station.gerant?.user?.telephone || "N/A"}</p>
+                  </div>
                   <div className="flex gap-2 mt-3">
+                    <button 
+                      onClick={() => openEditStation(station)}
+                      className="text-xs px-3 py-1 rounded-lg bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 transition"
+                    >
+                      ✏️ Modifier
+                    </button>
                     <a 
                       href={`https://www.google.com/maps/dir/?api=1&destination=${station.latitude},${station.longitude}`}
                       target="_blank"
@@ -929,7 +1136,7 @@ useEffect(() => {
           </div>
         )}
 
-        {/* GÉRANTS */}
+        {/* GÉRANTS - AVEC MODIFICATION ET ACTIVATION/DÉSACTIVATION */}
         {activeTab === "gerants" && (
           <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
             <div className="flex justify-between items-center mb-4">
@@ -951,12 +1158,22 @@ useEffect(() => {
                       <p className="text-sm text-gray-400">📞 {gerant.user?.telephone}</p>
                       <p className="text-xs text-orange-400 mt-1">📍 Station: {gerant.station?.nom || "Non affecté"}</p>
                     </div>
-                    <button
-                      onClick={() => handleToggleGerantStatus(gerant)}
-                      className={`px-2 py-1 rounded-full text-xs ${gerant.user?.statut ? "bg-green-500/20 text-green-300" : "bg-red-500/20 text-red-300"}`}
-                    >
-                      {gerant.user?.statut ? "Actif" : "Inactif"}
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleToggleGerantStatus(gerant)}
+                        className={`px-3 py-1 rounded-full text-xs ${
+                          gerant.user?.statut ? "bg-green-500/20 text-green-300" : "bg-red-500/20 text-red-300"
+                        }`}
+                      >
+                        {gerant.user?.statut ? "✅ Actif" : "❌ Inactif"}
+                      </button>
+                      <button
+                        onClick={() => openEditGerant(gerant)}
+                        className="px-3 py-1 rounded-full text-xs bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 transition"
+                      >
+                        ✏️ Modifier
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -967,7 +1184,7 @@ useEffect(() => {
           </div>
         )}
 
-        {/* CHAUFFEURS */}
+        {/* CHAUFFEURS - AVEC MODIFICATION ET ACTIVATION/DÉSACTIVATION */}
         {activeTab === "chauffeurs" && (
           <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
             <div className="flex justify-between items-center mb-4">
@@ -989,12 +1206,22 @@ useEffect(() => {
                       <p className="text-sm text-gray-400">📞 {chauffeur.user?.telephone}</p>
                       <p className="text-xs text-orange-400 mt-1">🪪 Permis: {chauffeur.permis}</p>
                     </div>
-                    <button
-                      onClick={() => handleToggleChauffeurStatus(chauffeur)}
-                      className={`px-2 py-1 rounded-full text-xs ${chauffeur.user?.statut ? "bg-green-500/20 text-green-300" : "bg-red-500/20 text-red-300"}`}
-                    >
-                      {chauffeur.user?.statut ? "Actif" : "Inactif"}
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleToggleChauffeurStatus(chauffeur)}
+                        className={`px-3 py-1 rounded-full text-xs ${
+                          chauffeur.user?.statut ? "bg-green-500/20 text-green-300" : "bg-red-500/20 text-red-300"
+                        }`}
+                      >
+                        {chauffeur.user?.statut ? "✅ Actif" : "❌ Inactif"}
+                      </button>
+                      <button
+                        onClick={() => openEditChauffeur(chauffeur)}
+                        className="px-3 py-1 rounded-full text-xs bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 transition"
+                      >
+                        ✏️ Modifier
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -1092,82 +1319,163 @@ useEffect(() => {
         )}
 
         {/* MISSIONS */}
-     {activeTab === "missions" && (
-  <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-    <h2 className="text-xl font-bold text-orange-400 mb-4">📦 Missions</h2>
-    <div className="space-y-3">
-      {missions.map((mission) => (
-        <div key={mission.id_mission} className="p-4 bg-white/5 rounded-lg border border-white/10 hover:border-orange-500/30 transition">
-          <div className="flex justify-between items-start flex-wrap gap-4">
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <p className="font-mono text-sm font-bold">Mission #{mission.id_mission}</p>
-                <span className={`px-2 py-0.5 rounded-full text-xs ${
-                  mission.statut === "planifiee" ? "bg-yellow-500/20 text-yellow-300" :
-                  mission.statut === "en_cours" ? "bg-blue-500/20 text-blue-300 animate-pulse" :
-                  mission.statut === "terminee" ? "bg-green-500/20 text-green-300" :
-                  "bg-red-500/20 text-red-300"
-                }`}>
-                  {mission.statut === "planifiee" ? "Planifiée" :
-                   mission.statut === "en_cours" ? "En cours" :
-                   mission.statut === "terminee" ? "Terminée" : mission.statut}
-                </span>
-                
-                {/* Statut du certificat */}
-                <span className={`px-2 py-0.5 rounded-full text-xs ${
-                  mission.certificat_statut === "complet" ? "bg-green-500/20 text-green-300" :
-                  mission.certificat_statut === "icr_signe" ? "bg-yellow-500/20 text-yellow-300" :
-                  "bg-gray-500/20 text-gray-300"
-                }`}>
-                  {mission.certificat_statut === "complet" ? "✅ Certificat signé" :
-                   mission.certificat_statut === "icr_signe" ? "✍️ En attente chauffeur" :
-                   "⏳ Non signé"}
-                </span>
-              </div>
-              <p className="text-sm mt-2">Bon #{mission.bon?.id_bon} - {mission.bon?.type_carburant}</p>
-              <p className="text-sm text-gray-400">🚛 Chauffeur: {mission.chauffeur?.user?.prenom} {mission.chauffeur?.user?.nom}</p>
-              <p className="text-sm text-gray-400">🚚 Camion: {mission.camion?.immatriculation}</p>
-            </div>
-            <div className="text-right">
-              <p className="text-xs text-gray-500">{mission.bon?.quantite_commandee} L à transporter</p>
-              <div className="flex gap-2 mt-2 flex-wrap justify-end">
-                {/* ✅ Bouton Voir position - visible pour planifiee et en_cours */}
-                {(mission.statut === "planifiee" || mission.statut === "en_cours") && (
-                  <button
-                    onClick={() => voirPositionCamion(mission.id_mission)}
-                    className="text-xs px-3 py-1 rounded-lg bg-green-500/20 text-green-300 hover:bg-green-500/30 transition"
-                  >
-                    📍 Voir position
-                  </button>
-                )}
-                
-                {mission.statut === "planifiee" && (
-                  <button
-                    onClick={() => handleAnnulerMission(mission.id_mission)}
-                    className="text-xs px-3 py-1 rounded-lg bg-red-500/20 text-red-300 hover:bg-red-500/30 transition"
-                  >
-                    Annuler
-                  </button>
-                )}
-                
-                <button
-                  onClick={() => voirCertificat(mission.id_mission)}
-                  className="text-xs px-3 py-1 rounded-lg bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 transition"
-                >
-                  📄 Voir certificat
-                </button>
-              </div>
+        {activeTab === "missions" && (
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+            <h2 className="text-xl font-bold text-orange-400 mb-4">📦 Missions</h2>
+            <div className="space-y-3">
+              {missions.map((mission) => (
+                <div key={mission.id_mission} className="p-4 bg-white/5 rounded-lg border border-white/10 hover:border-orange-500/30 transition">
+                  <div className="flex justify-between items-start flex-wrap gap-4">
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-mono text-sm font-bold">Mission #{mission.id_mission}</p>
+                        <span className={`px-2 py-0.5 rounded-full text-xs ${
+                          mission.statut === "planifiee" ? "bg-yellow-500/20 text-yellow-300" :
+                          mission.statut === "en_cours" ? "bg-blue-500/20 text-blue-300 animate-pulse" :
+                          mission.statut === "terminee" ? "bg-green-500/20 text-green-300" :
+                          "bg-red-500/20 text-red-300"
+                        }`}>
+                          {mission.statut === "planifiee" ? "Planifiée" :
+                           mission.statut === "en_cours" ? "En cours" :
+                           mission.statut === "terminee" ? "Terminée" : mission.statut}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded-full text-xs ${
+                          mission.certificat_statut === "complet" ? "bg-green-500/20 text-green-300" :
+                          mission.certificat_statut === "icr_signe" ? "bg-yellow-500/20 text-yellow-300" :
+                          "bg-gray-500/20 text-gray-300"
+                        }`}>
+                          {mission.certificat_statut === "complet" ? "✅ Certificat signé" :
+                           mission.certificat_statut === "icr_signe" ? "✍️ En attente chauffeur" :
+                           "⏳ Non signé"}
+                        </span>
+                      </div>
+                      <p className="text-sm mt-2">Bon #{mission.bon?.id_bon} - {mission.bon?.type_carburant}</p>
+                      <p className="text-sm text-gray-400">🚛 Chauffeur: {mission.chauffeur?.user?.prenom} {mission.chauffeur?.user?.nom}</p>
+                      <p className="text-sm text-gray-400">🚚 Camion: {mission.camion?.immatriculation}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500">{mission.bon?.quantite_commandee} L à transporter</p>
+                      <div className="flex gap-2 mt-2 flex-wrap justify-end">
+                        {(mission.statut === "planifiee" || mission.statut === "en_cours") && (
+                          <button
+                            onClick={() => voirPositionCamion(mission.id_mission)}
+                            className="text-xs px-3 py-1 rounded-lg bg-green-500/20 text-green-300 hover:bg-green-500/30 transition"
+                          >
+                            📍 Voir position
+                          </button>
+                        )}
+                        {mission.statut === "planifiee" && (
+                          <button
+                            onClick={() => handleAnnulerMission(mission.id_mission)}
+                            className="text-xs px-3 py-1 rounded-lg bg-red-500/20 text-red-300 hover:bg-red-500/30 transition"
+                          >
+                            Annuler
+                          </button>
+                        )}
+                        <button
+                          onClick={() => voirCertificat(mission.id_mission)}
+                          className="text-xs px-3 py-1 rounded-lg bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 transition"
+                        >
+                          📄 Voir certificat
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {missions.length === 0 && (
+                <div className="text-center text-gray-400 py-8">Aucune mission</div>
+              )}
             </div>
           </div>
-        </div>
-      ))}
-      {missions.length === 0 && (
-        <div className="text-center text-gray-400 py-8">Aucune mission</div>
-      )}
-    </div>
-  </div>
-)}
+        )}
+
+        {/* ✅ INCIDENTS TAB - NOUVEAU */}
+        {activeTab === "incidents" && (
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-orange-400">⚠️ Gestion des incidents</h2>
+              <div className="flex gap-2">
+                <span className="px-3 py-1 rounded-full text-xs bg-yellow-500/20 text-yellow-300">
+                  {incidents.filter(i => i.statut === 'en_attente').length} en attente
+                </span>
+                <span className="px-3 py-1 rounded-full text-xs bg-blue-500/20 text-blue-300">
+                  {incidents.filter(i => i.statut === 'en_cours').length} en cours
+                </span>
+                <span className="px-3 py-1 rounded-full text-xs bg-green-500/20 text-green-300">
+                  {incidents.filter(i => i.statut === 'resolu').length} résolus
+                </span>
+              </div>
+            </div>
+            
+            {incidents.length === 0 ? (
+              <div className="text-center text-gray-400 py-12">
+                <div className="text-6xl mb-4">✅</div>
+                <p>Aucun incident signalé par les chauffeurs</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {incidents.map((incident) => (
+                  <div 
+                    key={incident.id_incident} 
+                    className={`p-4 rounded-lg border transition cursor-pointer hover:border-orange-500/50 ${
+                      incident.statut === 'en_attente' ? 'bg-red-500/10 border-red-500/30' :
+                      incident.statut === 'en_cours' ? 'bg-yellow-500/10 border-yellow-500/30' :
+                      incident.statut === 'resolu' ? 'bg-green-500/10 border-green-500/30' :
+                      'bg-gray-500/10 border-gray-500/30'
+                    }`}
+                    onClick={() => openIncidentDetail(incident.id_incident)}
+                  >
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <span className={`px-2 py-0.5 rounded-full text-xs ${
+                            incident.statut === 'en_attente' ? 'bg-red-500/20 text-red-300 animate-pulse' :
+                            incident.statut === 'en_cours' ? 'bg-yellow-500/20 text-yellow-300' :
+                            incident.statut === 'resolu' ? 'bg-green-500/20 text-green-300' :
+                            'bg-gray-500/20 text-gray-300'
+                          }`}>
+                            {incident.statut === 'en_attente' ? '⚠️ En attente' :
+                             incident.statut === 'en_cours' ? '🔄 En cours' :
+                             incident.statut === 'resolu' ? '✅ Résolu' : '⏸️ Ignoré'}
+                          </span>
+                          <span className="text-xs text-gray-500">
+                            #{incident.id_incident}
+                          </span>
+                        </div>
+                        <p className="font-semibold">{incident.type}</p>
+                        <p className="text-sm text-gray-400 mt-1">{incident.message}</p>
+                        {incident.chauffeur?.user && (
+                          <p className="text-xs text-gray-500 mt-2">
+                            🚛 Chauffeur: {incident.chauffeur.user.prenom} {incident.chauffeur.user.nom}
+                          </p>
+                        )}
+                        {incident.mission && (
+                          <p className="text-xs text-gray-500">
+                            📦 Mission #{incident.mission.id_mission}
+                          </p>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-gray-500">
+                          {new Date(incident.date_incident).toLocaleString()}
+                        </p>
+                        <button 
+                          className="mt-2 px-3 py-1 rounded-lg bg-orange-500/20 text-orange-300 text-xs hover:bg-orange-500/30 transition"
+                        >
+                          Voir détails
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* ========== MODALES ========== */}
 
       {/* MODAL CRÉATION GÉRANT */}
       {showGerantModal && (
@@ -1186,6 +1494,30 @@ useEffect(() => {
               <div><label className="block text-sm text-gray-400 mb-1">Téléphone</label><input type="tel" className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white" value={gerantForm.telephone} onChange={(e) => setGerantForm({...gerantForm, telephone: e.target.value})} required /></div>
               <div><label className="block text-sm text-gray-400 mb-1">Mot de passe</label><input type="password" className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white" value={gerantForm.password} onChange={(e) => setGerantForm({...gerantForm, password: e.target.value})} required /></div>
               <button type="submit" disabled={loading} className="w-full bg-gradient-to-r from-orange-500 to-green-500 text-black font-semibold py-3 rounded-lg">{loading ? "Création..." : "Créer le gérant"}</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL MODIFICATION GÉRANT */}
+      {showEditGerantModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-gradient-to-br from-gray-900 to-black border border-orange-500/30 rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-orange-400">✏️ Modifier le gérant</h2>
+              <button onClick={() => setShowEditGerantModal(false)} className="text-gray-400 hover:text-white text-2xl">✕</button>
+            </div>
+            <form onSubmit={handleEditGerant} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="block text-sm text-gray-400 mb-1">Nom</label><input type="text" className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white" value={editGerant.nom} onChange={(e) => setEditGerant({...editGerant, nom: e.target.value})} required /></div>
+                <div><label className="block text-sm text-gray-400 mb-1">Prénom</label><input type="text" className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white" value={editGerant.prenom} onChange={(e) => setEditGerant({...editGerant, prenom: e.target.value})} required /></div>
+              </div>
+              <div><label className="block text-sm text-gray-400 mb-1">Email</label><input type="email" className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white" value={editGerant.email} onChange={(e) => setEditGerant({...editGerant, email: e.target.value})} /></div>
+              <div><label className="block text-sm text-gray-400 mb-1">Téléphone</label><input type="tel" className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white" value={editGerant.telephone} onChange={(e) => setEditGerant({...editGerant, telephone: e.target.value})} /></div>
+              <div className="flex gap-3">
+                <button type="submit" disabled={loading} className="flex-1 bg-gradient-to-r from-orange-500 to-green-500 text-black font-semibold py-3 rounded-lg">{loading ? "Modification..." : "✅ Modifier"}</button>
+                <button type="button" onClick={() => setShowEditGerantModal(false)} className="flex-1 bg-white/10 py-3 rounded-lg hover:bg-white/20 transition">Annuler</button>
+              </div>
             </form>
           </div>
         </div>
@@ -1214,6 +1546,31 @@ useEffect(() => {
         </div>
       )}
 
+      {/* MODAL MODIFICATION CHAUFFEUR */}
+      {showEditChauffeurModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-gradient-to-br from-gray-900 to-black border border-orange-500/30 rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-orange-400">✏️ Modifier le chauffeur</h2>
+              <button onClick={() => setShowEditChauffeurModal(false)} className="text-gray-400 hover:text-white text-2xl">✕</button>
+            </div>
+            <form onSubmit={handleEditChauffeur} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="block text-sm text-gray-400 mb-1">Nom</label><input type="text" className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white" value={editChauffeur.nom} onChange={(e) => setEditChauffeur({...editChauffeur, nom: e.target.value})} required /></div>
+                <div><label className="block text-sm text-gray-400 mb-1">Prénom</label><input type="text" className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white" value={editChauffeur.prenom} onChange={(e) => setEditChauffeur({...editChauffeur, prenom: e.target.value})} required /></div>
+              </div>
+              <div><label className="block text-sm text-gray-400 mb-1">Email</label><input type="email" className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white" value={editChauffeur.email} onChange={(e) => setEditChauffeur({...editChauffeur, email: e.target.value})} /></div>
+              <div><label className="block text-sm text-gray-400 mb-1">Téléphone</label><input type="tel" className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white" value={editChauffeur.telephone} onChange={(e) => setEditChauffeur({...editChauffeur, telephone: e.target.value})} /></div>
+              <div><label className="block text-sm text-gray-400 mb-1">Numéro de permis</label><input type="text" className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white" value={editChauffeur.permis} onChange={(e) => setEditChauffeur({...editChauffeur, permis: e.target.value})} required /></div>
+              <div className="flex gap-3">
+                <button type="submit" disabled={loading} className="flex-1 bg-gradient-to-r from-orange-500 to-green-500 text-black font-semibold py-3 rounded-lg">{loading ? "Modification..." : "✅ Modifier"}</button>
+                <button type="button" onClick={() => setShowEditChauffeurModal(false)} className="flex-1 bg-white/10 py-3 rounded-lg hover:bg-white/20 transition">Annuler</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* MODAL CRÉATION STATION */}
       {showStationModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -1235,12 +1592,47 @@ useEffect(() => {
                   <option value="">Sélectionner un gérant</option>
                   {gerants.map((gerant) => (
                     <option key={gerant.id_gerant} value={gerant.id_gerant}>
-                      {gerant.user?.prenom} {gerant.user?.nom}
+                      {gerant.user?.prenom} {gerant.user?.nom} - 📞 {gerant.user?.telephone}
                     </option>
                   ))}
                 </select>
               </div>
               <button type="submit" disabled={loading} className="w-full bg-gradient-to-r from-orange-500 to-green-500 text-black font-semibold py-3 rounded-lg">{loading ? "Création..." : "Créer la station"}</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL MODIFICATION STATION */}
+      {showEditStationModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-gradient-to-br from-gray-900 to-black border border-orange-500/30 rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-orange-400">✏️ Modifier la station</h2>
+              <button onClick={() => setShowEditStationModal(false)} className="text-gray-400 hover:text-white text-2xl">✕</button>
+            </div>
+            <form onSubmit={handleEditStation} className="space-y-4">
+              <div><label className="block text-sm text-gray-400 mb-1">Nom de la station</label><input type="text" className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white" value={editStation.nom} onChange={(e) => setEditStation({...editStation, nom: e.target.value})} required /></div>
+              <div><label className="block text-sm text-gray-400 mb-1">Adresse</label><input type="text" className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white" value={editStation.adresse} onChange={(e) => setEditStation({...editStation, adresse: e.target.value})} required /></div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="block text-sm text-gray-400 mb-1">Latitude</label><input type="text" className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white" value={editStation.latitude} onChange={(e) => setEditStation({...editStation, latitude: e.target.value})} /></div>
+                <div><label className="block text-sm text-gray-400 mb-1">Longitude</label><input type="text" className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white" value={editStation.longitude} onChange={(e) => setEditStation({...editStation, longitude: e.target.value})} /></div>
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Gérant</label>
+                <select className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white" value={editStation.id_gerant} onChange={(e) => setEditStation({...editStation, id_gerant: e.target.value})} required>
+                  <option value="">Sélectionner un gérant</option>
+                  {gerants.map((gerant) => (
+                    <option key={gerant.id_gerant} value={gerant.id_gerant}>
+                      {gerant.user?.prenom} {gerant.user?.nom}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex gap-3">
+                <button type="submit" disabled={loading} className="flex-1 bg-gradient-to-r from-orange-500 to-green-500 text-black font-semibold py-3 rounded-lg">{loading ? "Modification..." : "✅ Modifier"}</button>
+                <button type="button" onClick={() => setShowEditStationModal(false)} className="flex-1 bg-white/10 py-3 rounded-lg hover:bg-white/20 transition">Annuler</button>
+              </div>
             </form>
           </div>
         </div>
@@ -1266,7 +1658,6 @@ useEffect(() => {
                   required 
                 />
               </div>
-              
               <div>
                 <label className="block text-sm text-gray-400 mb-1">Capacité (L)</label>
                 <input 
@@ -1278,7 +1669,6 @@ useEffect(() => {
                   required 
                 />
               </div>
-              
               <div>
                 <label className="block text-sm text-gray-400 mb-1">Type de carburant</label>
                 <select 
@@ -1292,53 +1682,30 @@ useEffect(() => {
                   <option value="gasoil">Gasoil</option>
                 </select>
               </div>
-
               <div>
                 <label className="block text-sm text-gray-400 mb-1">Chauffeur</label>
                 <select 
                   className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white focus:border-orange-500 focus:outline-none" 
                   value={camionForm.id_chauffeur} 
-                  onChange={(e) => {
-                    console.log("=== SELECTION CHAUFFEUR ===");
-                    console.log("Nouvelle valeur sélectionnée:", e.target.value);
-                    setCamionForm({...camionForm, id_chauffeur: e.target.value});
-                  }} 
+                  onChange={(e) => setCamionForm({...camionForm, id_chauffeur: e.target.value})} 
                   required
                 >
                   <option value="">Sélectionner un chauffeur</option>
-                  {chauffeurs.map((chauffeur) => {
-                    console.log("Option ajoutée - ID:", chauffeur.id_chauffeur, "Nom:", chauffeur.user?.nom);
-                    return (
-                      <option key={chauffeur.id_chauffeur} value={chauffeur.id_chauffeur}>
-                        {chauffeur.user?.prenom} {chauffeur.user?.nom} - {chauffeur.permis}
-                      </option>
-                    );
-                  })}
+                  {chauffeurs.map((chauffeur) => (
+                    <option key={chauffeur.id_chauffeur} value={chauffeur.id_chauffeur}>
+                      {chauffeur.user?.prenom} {chauffeur.user?.nom} - {chauffeur.permis} 📞 {chauffeur.user?.telephone}
+                    </option>
+                  ))}
                 </select>
-                <p className="text-xs text-gray-500 mt-1">
-                  Sélectionnez un chauffeur pour ce camion
-                </p>
               </div>
-
               <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-3 mt-2">
-                <p className="text-xs text-orange-300">
-                  ℹ️ Le camion sera créé avec le statut "Disponible" par défaut.
-                </p>
+                <p className="text-xs text-orange-300">ℹ️ Le camion sera créé avec le statut "Disponible" par défaut.</p>
               </div>
-
               <div className="flex gap-3 pt-2">
-                <button 
-                  type="submit" 
-                  disabled={loading} 
-                  className="flex-1 bg-gradient-to-r from-orange-500 to-green-500 text-black font-semibold py-3 rounded-lg hover:shadow-lg transition disabled:opacity-50"
-                >
+                <button type="submit" disabled={loading} className="flex-1 bg-gradient-to-r from-orange-500 to-green-500 text-black font-semibold py-3 rounded-lg hover:shadow-lg transition disabled:opacity-50">
                   {loading ? "Création en cours..." : "✅ Créer le camion"}
                 </button>
-                <button 
-                  type="button"
-                  onClick={() => setShowCamionModal(false)} 
-                  className="flex-1 bg-white/10 py-3 rounded-lg hover:bg-white/20 transition"
-                >
+                <button type="button" onClick={() => setShowCamionModal(false)} className="flex-1 bg-white/10 py-3 rounded-lg hover:bg-white/20 transition">
                   Annuler
                 </button>
               </div>
@@ -1348,85 +1715,72 @@ useEffect(() => {
       )}
 
       {/* MODAL SUIVI GPS */}
-{showGpsModal && (
-  <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-    <div className="bg-gradient-to-br from-gray-900 to-black border border-orange-500/30 rounded-2xl p-6 w-full max-w-2xl">
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-bold text-orange-400">📍 Suivi GPS - Mission #{selectedMissionGps}</h2>
-        <button 
-          onClick={() => {
-            setShowGpsModal(false);
-            setPositionData(null);
-            setSelectedMissionGps(null);
-          }} 
-          className="text-gray-400 hover:text-white text-2xl"
-        >
-          ✕
-        </button>
-      </div>
-      
-      {!positionData ? (
-        <div className="text-center py-12">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto mb-4"></div>
-          <p className="text-gray-400">Chargement de la position...</p>
-        </div>
-      ) : positionData.has_position === false ? (
-        <div className="text-center py-12">
-          <div className="text-6xl mb-4">📍</div>
-          <p className="text-gray-400">{positionData.message || "Position non disponible"}</p>
-          <p className="text-sm text-gray-500 mt-2">
-            Le chauffeur n'a pas encore partagé sa position
-          </p>
-          <button
-            onClick={() => chargerPosition(selectedMissionGps!)}
-            className="mt-6 px-6 py-2 rounded-lg bg-orange-500 text-black font-semibold"
-          >
-            🔄 Actualiser
-          </button>
-        </div>
-      ) : (
-        <>
-          {/* Affichage des coordonnées */}
-          <div className="bg-white/5 rounded-lg p-4 mb-4">
-            <div className="text-center">
-              <div className="text-6xl mb-4">📍</div>
-              <p className="text-lg font-semibold">Position actuelle</p>
-              <p className="text-sm text-gray-400 mt-2">
-                Latitude: {positionData.position?.latitude || positionData.latitude}<br />
-                Longitude: {positionData.position?.longitude || positionData.longitude}
-              </p>
-              <p className="text-xs text-gray-500 mt-2">
-                Dernière mise à jour: {positionData.position?.date ? new Date(positionData.position.date).toLocaleString() : 
-                  positionData.date ? new Date(positionData.date).toLocaleString() : 'N/A'}
-              </p>
+      {showGpsModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-gradient-to-br from-gray-900 to-black border border-orange-500/30 rounded-2xl p-6 w-full max-w-2xl">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-orange-400">📍 Suivi GPS - Mission #{selectedMissionGps}</h2>
+              <button 
+                onClick={() => {
+                  setShowGpsModal(false);
+                  setPositionData(null);
+                  setSelectedMissionGps(null);
+                }} 
+                className="text-gray-400 hover:text-white text-2xl"
+              >
+                ✕
+              </button>
             </div>
+            
+            {!positionData ? (
+              <div className="text-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto mb-4"></div>
+                <p className="text-gray-400">Chargement de la position...</p>
+              </div>
+            ) : positionData.has_position === false ? (
+              <div className="text-center py-12">
+                <div className="text-6xl mb-4">📍</div>
+                <p className="text-gray-400">{positionData.message || "Position non disponible"}</p>
+                <p className="text-sm text-gray-500 mt-2">Le chauffeur n'a pas encore partagé sa position</p>
+                <button onClick={() => chargerPosition(selectedMissionGps!)} className="mt-6 px-6 py-2 rounded-lg bg-orange-500 text-black font-semibold">
+                  🔄 Actualiser
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="bg-white/5 rounded-lg p-4 mb-4">
+                  <div className="text-center">
+                    <div className="text-6xl mb-4">📍</div>
+                    <p className="text-lg font-semibold">Position actuelle</p>
+                    <p className="text-sm text-gray-400 mt-2">
+                      Latitude: {positionData.position?.latitude || positionData.latitude}<br />
+                      Longitude: {positionData.position?.longitude || positionData.longitude}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-2">
+                      Dernière mise à jour: {positionData.position?.date ? new Date(positionData.position.date).toLocaleString() : 
+                        positionData.date ? new Date(positionData.date).toLocaleString() : 'N/A'}
+                    </p>
+                  </div>
+                </div>
+                <div className="bg-white/5 rounded-lg p-4">
+                  <a
+                    href={`https://www.google.com/maps?q=${positionData.position?.latitude || positionData.latitude},${positionData.position?.longitude || positionData.longitude}`}
+                    target="_blank"
+                    className="block w-full px-4 py-3 rounded-lg bg-orange-500 text-black text-center font-semibold hover:bg-orange-600 transition"
+                  >
+                    🗺️ Ouvrir dans Google Maps
+                  </a>
+                </div>
+                <div className="mt-4">
+                  <button onClick={() => chargerPosition(selectedMissionGps!)} className="w-full px-4 py-2 rounded-lg bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 transition">
+                    🔄 Actualiser la position
+                  </button>
+                </div>
+              </>
+            )}
           </div>
-          
-          {/* Lien Google Maps */}
-          <div className="bg-white/5 rounded-lg p-4">
-            <a
-              href={`https://www.google.com/maps?q=${positionData.position?.latitude || positionData.latitude},${positionData.position?.longitude || positionData.longitude}`}
-              target="_blank"
-              className="block w-full px-4 py-3 rounded-lg bg-orange-500 text-black text-center font-semibold hover:bg-orange-600 transition"
-            >
-              🗺️ Ouvrir dans Google Maps
-            </a>
-          </div>
-          
-          {/* Bouton actualiser */}
-          <div className="mt-4">
-            <button
-              onClick={() => chargerPosition(selectedMissionGps!)}
-              className="w-full px-4 py-2 rounded-lg bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 transition"
-            >
-              🔄 Actualiser la position
-            </button>
-          </div>
-        </>
+        </div>
       )}
-    </div>
-  </div>
-)}
 
       {/* MODAL ORGANISER MISSION */}
       {showMissionModal && selectedBon && (
@@ -1448,7 +1802,9 @@ useEffect(() => {
                   <select className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white" value={missionForm.id_chauffeur} onChange={(e) => setMissionForm({...missionForm, id_chauffeur: e.target.value})}>
                     <option value="">Sélectionner un chauffeur</option>
                     {chauffeurs.map((chauffeur) => (
-                      <option key={chauffeur.id_chauffeur} value={chauffeur.id_chauffeur}>{chauffeur.user?.prenom} {chauffeur.user?.nom} - {chauffeur.permis}</option>
+                      <option key={chauffeur.id_chauffeur} value={chauffeur.id_chauffeur}>
+                        {chauffeur.user?.prenom} {chauffeur.user?.nom} - {chauffeur.permis} 📞 {chauffeur.user?.telephone}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -1457,7 +1813,9 @@ useEffect(() => {
                   <select className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white" value={missionForm.id_camion} onChange={(e) => setMissionForm({...missionForm, id_camion: e.target.value})}>
                     <option value="">Sélectionner un camion</option>
                     {camions.filter(c => c.statut === "disponible").map((camion) => (
-                      <option key={camion.id_camion} value={camion.id_camion}>{camion.immatriculation} - {camion.capacite}L - {camion.type_carburant}</option>
+                      <option key={camion.id_camion} value={camion.id_camion}>
+                        {camion.immatriculation} - {camion.capacite}L - {camion.type_carburant}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -1469,22 +1827,67 @@ useEffect(() => {
                 </div>
                 <div className="space-y-3 max-h-60 overflow-y-auto">
                   {missionForm.livraisons.length === 0 && <div className="text-center text-gray-500 py-4 text-sm">Aucune livraison. Cliquez sur "+ Ajouter station"</div>}
-                  {missionForm.livraisons.map((livraison, index) => (
-                    <div key={index} className="p-3 bg-white/5 rounded-lg border border-white/10">
-                      <div className="flex justify-between mb-2"><span className="text-xs text-orange-400">Livraison #{index + 1}</span><button onClick={() => supprimerLivraison(index)} className="text-red-400 text-xs">Supprimer</button></div>
-                      <div className="grid grid-cols-3 gap-2">
-                        <select className="p-2 rounded-lg bg-black/50 border border-white/10 text-white text-sm" value={livraison.id_station} onChange={(e) => updateLivraison(index, "id_station", e.target.value)}>
-                          <option value="">Station</option>
-                          {stations.map((station) => (<option key={station.id_station} value={station.id_station}>{station.nom}</option>))}
-                        </select>
-                        <input type="number" placeholder="Quantité (L)" className="p-2 rounded-lg bg-black/50 border border-white/10 text-white text-sm" value={livraison.quantite_prevue} onChange={(e) => updateLivraison(index, "quantite_prevue", e.target.value)} />
-                        <input type="text" maxLength={4} placeholder="Code" className="p-2 rounded-lg bg-black/50 border border-white/10 text-white text-sm" value={livraison.code_validation} onChange={(e) => updateLivraison(index, "code_validation", e.target.value)} />
+                  {missionForm.livraisons.map((livraison, index) => {
+                    const stationSelectionnee = stations.find(s => s.id_station === parseInt(livraison.id_station));
+                    return (
+                      <div key={index} className="p-3 bg-white/5 rounded-lg border border-white/10">
+                        <div className="flex justify-between mb-2">
+                          <span className="text-xs text-orange-400">Livraison #{index + 1}</span>
+                          <button onClick={() => supprimerLivraison(index)} className="text-red-400 text-xs">Supprimer</button>
+                        </div>
+                        
+                        {stationSelectionnee && (
+                          <div className="mb-2 p-2 bg-green-500/10 rounded-lg border border-green-500/20">
+                            <p className="text-xs text-gray-400">📍 Station sélectionnée</p>
+                            <p className="text-sm font-semibold text-green-300">{stationSelectionnee.nom}</p>
+                            <p className="text-xs text-gray-400">{stationSelectionnee.adresse}</p>
+                          </div>
+                        )}
+                        
+                        <div className="grid grid-cols-3 gap-2">
+                          <select 
+                            className="p-2 rounded-lg bg-black/50 border border-white/10 text-white text-sm" 
+                            value={livraison.id_station} 
+                            onChange={(e) => updateLivraison(index, "id_station", e.target.value)}
+                          >
+                            <option value="">Station</option>
+                            {stations.map((station) => (
+                              <option key={station.id_station} value={station.id_station}>
+                                {station.nom} - {station.adresse}
+                              </option>
+                            ))}
+                          </select>
+                          <input 
+                            type="number" 
+                            placeholder="Quantité (L)" 
+                            className="p-2 rounded-lg bg-black/50 border border-white/10 text-white text-sm" 
+                            value={livraison.quantite_prevue} 
+                            onChange={(e) => updateLivraison(index, "quantite_prevue", e.target.value)} 
+                          />
+                          <input 
+                            type="text" 
+                            maxLength={4} 
+                            placeholder="Code" 
+                            className="p-2 rounded-lg bg-black/50 border border-white/10 text-white text-sm uppercase" 
+                            value={livraison.code_validation} 
+                            onChange={(e) => updateLivraison(index, "code_validation", e.target.value)} 
+                          />
+                        </div>
+                        
+                        {stationSelectionnee && (
+                          <div className="mt-2 text-xs text-gray-500 border-t border-white/10 pt-2">
+                            <p>👨‍💼 Gérant: {stationSelectionnee.gerant?.user?.prenom} {stationSelectionnee.gerant?.user?.nom}</p>
+                            <p>📞 {stationSelectionnee.gerant?.user?.telephone || "Tél: N/A"}</p>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
-              <button onClick={handleOrganiserMission} disabled={loading} className="w-full bg-gradient-to-r from-orange-500 to-green-500 text-black font-semibold py-3 rounded-lg">{loading ? "Organisation..." : "✅ Organiser la mission"}</button>
+              <button onClick={handleOrganiserMission} disabled={loading} className="w-full bg-gradient-to-r from-orange-500 to-green-500 text-black font-semibold py-3 rounded-lg">
+                {loading ? "Organisation..." : "✅ Organiser la mission"}
+              </button>
             </div>
           </div>
         </div>
@@ -1496,22 +1899,12 @@ useEffect(() => {
           <div className="bg-gradient-to-br from-gray-900 to-black border border-orange-500/30 rounded-2xl p-6 w-full max-w-2xl">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-bold text-orange-400">✍️ Signature du Certificat</h2>
-              <button 
-                onClick={() => { setShowSignatureModal(false); setMissionToSign(null); }} 
-                className="text-gray-400 hover:text-white text-2xl"
-              >
-                ✕
-              </button>
+              <button onClick={() => { setShowSignatureModal(false); setMissionToSign(null); }} className="text-gray-400 hover:text-white text-2xl">✕</button>
             </div>
-            
             <div className="bg-white/5 rounded-lg p-4 mb-4">
               <p className="text-gray-400 text-sm">Mission #{missionToSign.id_mission}</p>
-              <p className="text-sm text-orange-400 mt-1">
-                Veuillez signer dans le cadre ci-dessous pour valider le certificat de transport
-              </p>
+              <p className="text-sm text-orange-400 mt-1">Veuillez signer dans le cadre ci-dessous pour valider le certificat de transport</p>
             </div>
-            
-            {/* Zone de signature */}
             <div className="border-2 border-orange-500/30 rounded-lg p-2 bg-white mb-4">
               <canvas
                 ref={signatureCanvasRef}
@@ -1528,23 +1921,10 @@ useEffect(() => {
                 onTouchEnd={endDrawing}
               />
             </div>
-            
-            <div className="text-center text-xs text-gray-500 mb-4">
-              Signez dans le cadre ci-dessus
-            </div>
-            
+            <div className="text-center text-xs text-gray-500 mb-4">Signez dans le cadre ci-dessus</div>
             <div className="flex gap-3">
-              <button
-                onClick={clearSignature}
-                className="flex-1 px-4 py-2 rounded-lg bg-gray-700 text-white hover:bg-gray-600 transition"
-              >
-                🧹 Effacer
-              </button>
-              <button
-                onClick={saveSignature}
-                disabled={loading}
-                className="flex-1 px-4 py-2 rounded-lg bg-gradient-to-r from-orange-500 to-green-500 text-black font-semibold hover:shadow-lg transition disabled:opacity-50"
-              >
+              <button onClick={clearSignature} className="flex-1 px-4 py-2 rounded-lg bg-gray-700 text-white hover:bg-gray-600 transition">🧹 Effacer</button>
+              <button onClick={saveSignature} disabled={loading} className="flex-1 px-4 py-2 rounded-lg bg-gradient-to-r from-orange-500 to-green-500 text-black font-semibold hover:shadow-lg transition disabled:opacity-50">
                 {loading ? "Enregistrement..." : "✅ Valider et signer"}
               </button>
             </div>
@@ -1552,188 +1932,270 @@ useEffect(() => {
         </div>
       )}
 
-
+      {/* ✅ MODAL DÉTAILS INCIDENT */}
+      {showIncidentModal && selectedIncident && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-gradient-to-br from-gray-900 to-black border border-orange-500/30 rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-orange-400">⚠️ Détail de l'incident</h2>
+              <button onClick={() => setShowIncidentModal(false)} className="text-gray-400 hover:text-white text-2xl">✕</button>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="bg-white/5 rounded-lg p-4">
+                <p className="text-gray-400 text-sm">Type</p>
+                <p className="font-bold text-lg">{selectedIncident.type}</p>
+              </div>
+              
+              <div className="bg-white/5 rounded-lg p-4">
+                <p className="text-gray-400 text-sm">Message</p>
+                <p className="text-white">{selectedIncident.message}</p>
+              </div>
+              
+              {selectedIncident.chauffeur?.user && (
+                <div className="bg-white/5 rounded-lg p-4">
+                  <p className="text-gray-400 text-sm">Chauffeur</p>
+                  <p className="font-semibold">{selectedIncident.chauffeur.user.prenom} {selectedIncident.chauffeur.user.nom}</p>
+                  <p className="text-xs text-gray-400">📞 {selectedIncident.chauffeur.user.telephone}</p>
+                </div>
+              )}
+              
+              {selectedIncident.mission && (
+                <div className="bg-white/5 rounded-lg p-4">
+                  <p className="text-gray-400 text-sm">Mission</p>
+                  <p className="font-semibold">#{selectedIncident.mission.id_mission}</p>
+                  {selectedIncident.mission.bon && (
+                    <p className="text-xs text-gray-400">Bon #{selectedIncident.mission.bon.id_bon} - {selectedIncident.mission.bon.type_carburant}</p>
+                  )}
+                  {selectedIncident.mission.camion && (
+                    <p className="text-xs text-gray-400">Camion: {selectedIncident.mission.camion.immatriculation}</p>
+                  )}
+                </div>
+              )}
+              
+              {selectedIncident.latitude && selectedIncident.longitude && (
+                <div className="bg-white/5 rounded-lg p-4">
+                  <p className="text-gray-400 text-sm">📍 Position</p>
+                  <p className="text-xs text-gray-400">Lat: {selectedIncident.latitude}, Lng: {selectedIncident.longitude}</p>
+                  <a 
+                    href={`https://www.google.com/maps?q=${selectedIncident.latitude},${selectedIncident.longitude}`}
+                    target="_blank"
+                    className="text-xs text-orange-400 hover:text-orange-300"
+                  >
+                    Voir sur Google Maps
+                  </a>
+                </div>
+              )}
+              
+              <div className="bg-white/5 rounded-lg p-4">
+                <p className="text-gray-400 text-sm">Date</p>
+                <p className="text-sm">{new Date(selectedIncident.date_incident).toLocaleString()}</p>
+              </div>
+              
+              <div className="bg-white/5 rounded-lg p-4">
+                <p className="text-gray-400 text-sm mb-2">Statut</p>
+                <select 
+                  className="w-full p-3 rounded-lg bg-black/50 border border-white/10 text-white"
+                  value={incidentStatut}
+                  onChange={(e) => setIncidentStatut(e.target.value)}
+                >
+                  <option value="en_attente">⚠️ En attente</option>
+                  <option value="en_cours">🔄 En cours</option>
+                  <option value="resolu">✅ Résolu</option>
+                  <option value="ignore">⏸️ Ignoré</option>
+                </select>
+              </div>
+              
+              <button
+                onClick={handleUpdateIncidentStatus}
+                disabled={loading}
+                className="w-full px-4 py-3 rounded-lg bg-gradient-to-r from-orange-500 to-green-500 text-black font-semibold hover:shadow-lg transition disabled:opacity-50"
+              >
+                {loading ? "Mise à jour..." : "✅ Mettre à jour le statut"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL AFFICHAGE CERTIFICAT */}
-{/* MODAL AFFICHAGE CERTIFICAT */}
-{showCertificatModal && certificatDetails && (
-  <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-    <div className="bg-gradient-to-br from-gray-900 to-black border border-orange-500/30 rounded-2xl p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-      <div className="flex justify-between items-center mb-4 sticky top-0 bg-gradient-to-br from-gray-900 to-black">
-        <h2 className="text-xl font-bold text-orange-400">📄 Certificat de Transport</h2>
-        <button onClick={() => setShowCertificatModal(false)} className="text-gray-400 hover:text-white text-2xl">✕</button>
-      </div>
-      
-      <div className="space-y-4">
-        {/* En-tête du certificat */}
-        <div className="bg-gradient-to-r from-orange-500/10 to-green-500/10 rounded-lg p-4 border border-orange-500/30">
-          <p className="text-center text-lg font-bold">CERTIFICAT DE TRANSPORT</p>
-          <p className="text-center text-sm text-gray-400">N° {certificatDetails.mission.id_mission}</p>
-          <p className="text-center text-xs text-gray-500">Généré le {new Date(certificatDetails.certificat?.date_generation).toLocaleString()}</p>
-        </div>
-
-        {/* Informations de la mission */}
-        <div className="bg-white/5 rounded-lg p-4">
-          <h3 className="text-orange-400 font-semibold mb-2">📋 Informations de la mission</h3>
-          <div className="grid grid-cols-2 gap-2 text-sm">
-            <p className="text-gray-400">Statut:</p>
-            <p className="text-white">{certificatDetails.mission.statut}</p>
-            <p className="text-gray-400">Date début:</p>
-            <p className="text-white">{certificatDetails.mission.date_debut ? new Date(certificatDetails.mission.date_debut).toLocaleString() : '-'}</p>
-            <p className="text-gray-400">Date départ:</p>
-            <p className="text-white">{certificatDetails.mission.date_depart ? new Date(certificatDetails.mission.date_depart).toLocaleString() : '-'}</p>
-          </div>
-        </div>
-
-        {/* Informations du bon */}
-        <div className="bg-white/5 rounded-lg p-4">
-          <h3 className="text-orange-400 font-semibold mb-2">🎫 Informations du bon</h3>
-          <div className="grid grid-cols-2 gap-2 text-sm">
-            <p className="text-gray-400">N° Bon:</p>
-            <p className="text-white">{certificatDetails.bon.id_bon}</p>
-            <p className="text-gray-400">Code vérification:</p>
-            <p className="text-white font-mono">{certificatDetails.bon.code_verification}</p>
-            <p className="text-gray-400">Type carburant:</p>
-            <p className="text-white">{certificatDetails.bon.type_carburant}</p>
-            <p className="text-gray-400">Quantité commandée:</p>
-            <p className="text-white">{certificatDetails.bon.quantite_commandee} L</p>
-            <p className="text-gray-400">Quantité chargée:</p>
-            <p className="text-white">{certificatDetails.bon.quantite_chargee || '-'} L</p>
-            <p className="text-gray-400">Fournisseur:</p>
-            <p className="text-white">{certificatDetails.bon.fournisseur?.nom_societe || '-'}</p>
-            <p className="text-gray-400">Dépôt:</p>
-            <p className="text-white">{certificatDetails.bon.depot?.nom || '-'}</p>
-          </div>
-        </div>
-
-        {/* ICR et Chauffeur */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-white/5 rounded-lg p-4">
-            <h3 className="text-orange-400 font-semibold mb-2">👤 ICR</h3>
-            <p className="text-sm">{certificatDetails.icr.prenom} {certificatDetails.icr.nom}</p>
-            <p className="text-xs text-gray-400">{certificatDetails.icr.email}</p>
-            <p className="text-xs text-gray-400">{certificatDetails.icr.telephone}</p>
-            <p className="text-xs text-gray-400">Matricule: {certificatDetails.icr.matricule}</p>
-          </div>
-          <div className="bg-white/5 rounded-lg p-4">
-            <h3 className="text-orange-400 font-semibold mb-2">🚛 Chauffeur</h3>
-            <p className="text-sm">{certificatDetails.chauffeur.prenom} {certificatDetails.chauffeur.nom}</p>
-            <p className="text-xs text-gray-400">{certificatDetails.chauffeur.email}</p>
-            <p className="text-xs text-gray-400">{certificatDetails.chauffeur.telephone}</p>
-            <p className="text-xs text-gray-400">Permis: {certificatDetails.chauffeur.permis}</p>
-          </div>
-        </div>
-
-        {/* Camion */}
-        <div className="bg-white/5 rounded-lg p-4">
-          <h3 className="text-orange-400 font-semibold mb-2">🚚 Camion</h3>
-          <div className="grid grid-cols-2 gap-2 text-sm">
-            <p className="text-gray-400">Immatriculation:</p>
-            <p className="text-white">{certificatDetails.camion.immatriculation}</p>
-            <p className="text-gray-400">Capacité:</p>
-            <p className="text-white">{certificatDetails.camion.capacite} L</p>
-            <p className="text-gray-400">Type carburant:</p>
-            <p className="text-white">{certificatDetails.camion.type_carburant}</p>
-          </div>
-        </div>
-
-        {/* Livraisons */}
-        <div className="bg-white/5 rounded-lg p-4">
-          <h3 className="text-orange-400 font-semibold mb-2">📍 Livraisons</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-gray-400 border-b border-white/10">
-                  <th className="text-left py-2">Station</th>
-                  <th className="text-left py-2">Quantité prévue</th>
-                  <th className="text-left py-2">Quantité livrée</th>
-                  <th className="text-left py-2">Code</th>
-                  <th className="text-left py-2">Statut</th>
-                </tr>
-              </thead>
-              <tbody>
-                {certificatDetails.livraisons.map((livraison: any, index: number) => (
-                  <tr key={index} className="border-b border-white/5">
-                    <td className="py-2">{livraison.station.nom}</td>
-                    <td className="py-2">{livraison.quantite_prevue} L</td>
-                    <td className="py-2">{livraison.quantite_livree || '-'} L</td>
-                    <td className="py-2 font-mono">{livraison.code_validation}</td>
-                    <td className="py-2">
-                      <span className={`px-2 py-0.5 rounded-full text-xs ${
-                        livraison.statut === 'validee' ? 'bg-green-500/20 text-green-300' :
-                        livraison.statut === 'ecart' ? 'bg-red-500/20 text-red-300' :
-                        'bg-yellow-500/20 text-yellow-300'
-                      }`}>
-                        {livraison.statut}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot className="border-t border-white/10">
-                <tr className="text-orange-400">
-                  <td className="py-2 font-semibold">Total</td>
-                  <td className="py-2">{certificatDetails.totaux.quantite_totale_prevue} L</td>
-                  <td className="py-2">{certificatDetails.totaux.quantite_totale_livree || '-'} L</td>
-                  <td colSpan={2}></td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        </div>
-
-        {/* Signatures */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-white/5 rounded-lg p-4">
-            <h3 className="text-orange-400 font-semibold mb-2">✍️ Signature ICR</h3>
-            {certificatDetails.signatures.signature_icr ? (
-              <div>
-                <img src={certificatDetails.signatures.signature_icr} alt="Signature ICR" className="max-w-full h-20 object-contain bg-white rounded" />
-                <p className="text-green-400 text-xs mt-1">✅ Signé</p>
+      {showCertificatModal && certificatDetails && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-gradient-to-br from-gray-900 to-black border border-orange-500/30 rounded-2xl p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4 sticky top-0 bg-gradient-to-br from-gray-900 to-black">
+              <h2 className="text-xl font-bold text-orange-400">📄 Certificat de Transport</h2>
+              <button onClick={() => setShowCertificatModal(false)} className="text-gray-400 hover:text-white text-2xl">✕</button>
+            </div>
+            
+            <div className="space-y-4">
+              {/* En-tête du certificat */}
+              <div className="bg-gradient-to-r from-orange-500/10 to-green-500/10 rounded-lg p-4 border border-orange-500/30">
+                <p className="text-center text-lg font-bold">CERTIFICAT DE TRANSPORT</p>
+                <p className="text-center text-sm text-gray-400">N° {certificatDetails.mission.id_mission}</p>
+                <p className="text-center text-xs text-gray-500">Généré le {new Date(certificatDetails.certificat?.date_generation).toLocaleString()}</p>
               </div>
-            ) : (
-              <p className="text-yellow-400 text-sm">⏳ En attente</p>
-            )}
-          </div>
-          
-          <div className="bg-white/5 rounded-lg p-4">
-            <h3 className="text-orange-400 font-semibold mb-2">✍️ Signature Chauffeur</h3>
-            {certificatDetails.signatures.signature_chauffeur ? (
-              <div>
-                <img src={certificatDetails.signatures.signature_chauffeur} alt="Signature Chauffeur" className="max-w-full h-20 object-contain bg-white rounded" />
-                <p className="text-green-400 text-xs mt-1">✅ Signé</p>
+
+              {/* Informations de la mission */}
+              <div className="bg-white/5 rounded-lg p-4">
+                <h3 className="text-orange-400 font-semibold mb-2">📋 Informations de la mission</h3>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <p className="text-gray-400">Statut:</p>
+                  <p className="text-white">{certificatDetails.mission.statut}</p>
+                  <p className="text-gray-400">Date début:</p>
+                  <p className="text-white">{certificatDetails.mission.date_debut ? new Date(certificatDetails.mission.date_debut).toLocaleString() : '-'}</p>
+                  <p className="text-gray-400">Date départ:</p>
+                  <p className="text-white">{certificatDetails.mission.date_depart ? new Date(certificatDetails.mission.date_depart).toLocaleString() : '-'}</p>
+                </div>
               </div>
-            ) : (
-              <p className="text-yellow-400 text-sm">⏳ En attente</p>
-            )}
+
+              {/* Informations du bon */}
+              <div className="bg-white/5 rounded-lg p-4">
+                <h3 className="text-orange-400 font-semibold mb-2">🎫 Informations du bon</h3>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <p className="text-gray-400">N° Bon:</p>
+                  <p className="text-white">{certificatDetails.bon.id_bon}</p>
+                  <p className="text-gray-400">Code vérification:</p>
+                  <p className="text-white font-mono">{certificatDetails.bon.code_verification}</p>
+                  <p className="text-gray-400">Type carburant:</p>
+                  <p className="text-white">{certificatDetails.bon.type_carburant}</p>
+                  <p className="text-gray-400">Quantité commandée:</p>
+                  <p className="text-white">{certificatDetails.bon.quantite_commandee} L</p>
+                  <p className="text-gray-400">Quantité chargée:</p>
+                  <p className="text-white">{certificatDetails.bon.quantite_chargee || '-'} L</p>
+                  <p className="text-gray-400">Fournisseur:</p>
+                  <p className="text-white">{certificatDetails.bon.fournisseur?.nom_societe || '-'}</p>
+                  <p className="text-gray-400">Dépôt:</p>
+                  <p className="text-white">{certificatDetails.bon.depot?.nom || '-'}</p>
+                </div>
+              </div>
+
+              {/* ICR et Chauffeur */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-white/5 rounded-lg p-4">
+                  <h3 className="text-orange-400 font-semibold mb-2">👤 ICR</h3>
+                  <p className="text-sm">{certificatDetails.icr.prenom} {certificatDetails.icr.nom}</p>
+                  <p className="text-xs text-gray-400">{certificatDetails.icr.email}</p>
+                  <p className="text-xs text-gray-400">{certificatDetails.icr.telephone}</p>
+                  <p className="text-xs text-gray-400">Matricule: {certificatDetails.icr.matricule}</p>
+                </div>
+                <div className="bg-white/5 rounded-lg p-4">
+                  <h3 className="text-orange-400 font-semibold mb-2">🚛 Chauffeur</h3>
+                  <p className="text-sm">{certificatDetails.chauffeur.prenom} {certificatDetails.chauffeur.nom}</p>
+                  <p className="text-xs text-gray-400">{certificatDetails.chauffeur.email}</p>
+                  <p className="text-xs text-gray-400">{certificatDetails.chauffeur.telephone}</p>
+                  <p className="text-xs text-gray-400">Permis: {certificatDetails.chauffeur.permis}</p>
+                </div>
+              </div>
+
+              {/* Camion */}
+              <div className="bg-white/5 rounded-lg p-4">
+                <h3 className="text-orange-400 font-semibold mb-2">🚚 Camion</h3>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <p className="text-gray-400">Immatriculation:</p>
+                  <p className="text-white">{certificatDetails.camion.immatriculation}</p>
+                  <p className="text-gray-400">Capacité:</p>
+                  <p className="text-white">{certificatDetails.camion.capacite} L</p>
+                  <p className="text-gray-400">Type carburant:</p>
+                  <p className="text-white">{certificatDetails.camion.type_carburant}</p>
+                </div>
+              </div>
+
+              {/* Livraisons */}
+              <div className="bg-white/5 rounded-lg p-4">
+                <h3 className="text-orange-400 font-semibold mb-2">📍 Livraisons</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-gray-400 border-b border-white/10">
+                        <th className="text-left py-2">Station</th>
+                        <th className="text-left py-2">Quantité prévue</th>
+                        <th className="text-left py-2">Quantité livrée</th>
+                        <th className="text-left py-2">Code</th>
+                        <th className="text-left py-2">Statut</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {certificatDetails.livraisons.map((livraison: any, index: number) => (
+                        <tr key={index} className="border-b border-white/5">
+                          <td className="py-2">{livraison.station.nom}</td>
+                          <td className="py-2">{livraison.quantite_prevue} L</td>
+                          <td className="py-2">{livraison.quantite_livree || '-'} L</td>
+                          <td className="py-2 font-mono">{livraison.code_validation}</td>
+                          <td className="py-2">
+                            <span className={`px-2 py-0.5 rounded-full text-xs ${
+                              livraison.statut === 'validee' ? 'bg-green-500/20 text-green-300' :
+                              livraison.statut === 'ecart' ? 'bg-red-500/20 text-red-300' :
+                              'bg-yellow-500/20 text-yellow-300'
+                            }`}>
+                              {livraison.statut}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="border-t border-white/10">
+                      <tr className="text-orange-400">
+                        <td className="py-2 font-semibold">Total</td>
+                        <td className="py-2">{certificatDetails.totaux.quantite_totale_prevue} L</td>
+                        <td className="py-2">{certificatDetails.totaux.quantite_totale_livree || '-'} L</td>
+                        <td colSpan={2}></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+
+              {/* Signatures */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-white/5 rounded-lg p-4">
+                  <h3 className="text-orange-400 font-semibold mb-2">✍️ Signature ICR</h3>
+                  {certificatDetails.signatures.signature_icr ? (
+                    <div>
+                      <img src={certificatDetails.signatures.signature_icr} alt="Signature ICR" className="max-w-full h-20 object-contain bg-white rounded" />
+                      <p className="text-green-400 text-xs mt-1">✅ Signé</p>
+                    </div>
+                  ) : (
+                    <p className="text-yellow-400 text-sm">⏳ En attente</p>
+                  )}
+                </div>
+                <div className="bg-white/5 rounded-lg p-4">
+                  <h3 className="text-orange-400 font-semibold mb-2">✍️ Signature Chauffeur</h3>
+                  {certificatDetails.signatures.signature_chauffeur ? (
+                    <div>
+                      <img src={certificatDetails.signatures.signature_chauffeur} alt="Signature Chauffeur" className="max-w-full h-20 object-contain bg-white rounded" />
+                      <p className="text-green-400 text-xs mt-1">✅ Signé</p>
+                    </div>
+                  ) : (
+                    <p className="text-yellow-400 text-sm">⏳ En attente</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Statut final */}
+              <div className="bg-white/5 rounded-lg p-4">
+                <h3 className="text-orange-400 font-semibold mb-2">📊 Statut du certificat</h3>
+                {certificatDetails.signatures.certificat_complet ? (
+                  <p className="text-green-400">✅ Certificat complet et validé - Toutes les signatures sont présentes</p>
+                ) : certificatDetails.signatures.icr_signe ? (
+                  <p className="text-yellow-400">✍️ En attente de la signature du chauffeur</p>
+                ) : (
+                  <p className="text-red-400">❌ Aucune signature - En attente des signatures</p>
+                )}
+              </div>
+
+              {/* Bouton téléchargement */}
+              {certificatDetails.signatures.certificat_complet && (
+                <button
+                  onClick={() => downloadCertificatPDF(certificatDetails.certificat.id_certificat)}
+                  className="w-full px-4 py-3 rounded-lg bg-gradient-to-r from-orange-500 to-green-500 text-black font-semibold hover:shadow-lg transition"
+                >
+                  📥 Télécharger le certificat PDF
+                </button>
+              )}
+            </div>
           </div>
         </div>
-
-        {/* Statut final */}
-        <div className="bg-white/5 rounded-lg p-4">
-          <h3 className="text-orange-400 font-semibold mb-2">📊 Statut du certificat</h3>
-          {certificatDetails.signatures.certificat_complet ? (
-            <p className="text-green-400">✅ Certificat complet et validé - Toutes les signatures sont présentes</p>
-          ) : certificatDetails.signatures.icr_signe ? (
-            <p className="text-yellow-400">✍️ En attente de la signature du chauffeur</p>
-          ) : (
-            <p className="text-red-400">❌ Aucune signature - En attente des signatures</p>
-          )}
-        </div>
-
-        {/* Bouton téléchargement */}
-        {certificatDetails.signatures.certificat_complet && (
-          <button
-            onClick={() => downloadCertificatPDF(certificatDetails.certificat.id_certificat)}
-            className="w-full px-4 py-3 rounded-lg bg-gradient-to-r from-orange-500 to-green-500 text-black font-semibold hover:shadow-lg transition"
-          >
-            📥 Télécharger le certificat PDF
-          </button>
-        )}
-      </div>
-    </div>
-  </div>
-)}
+      )}
     </div>
   );
 }

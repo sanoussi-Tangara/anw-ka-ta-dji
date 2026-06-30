@@ -19,8 +19,24 @@ import {
   activerResponsableDepot,
   creerDepot,
   getDepots,
-  changerResponsable,  // ← Changé ici (au lieu de affecterResponsable)
+  changerResponsable,
+  updateFournisseur,
+  updateIcr,
+  updateResponsableDepot,
+  getHistoriquePrix,
 } from "../../lib/api";
+
+// ✅ IMPORTER RECHARTS
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from "recharts";
 
 /* ================= TYPES ================= */
 
@@ -47,6 +63,7 @@ type Icr = {
   id_icr: number;
   matricule: string;
   nom_entreprise?: string;
+  zone?: string;
   created_at?: string;
   user?: User;
 };
@@ -84,6 +101,13 @@ type Prix = {
   gasoil: number;
 };
 
+type HistoriquePrix = {
+  essence: number;
+  gasoil: number;
+  date: string;
+  timestamp: number;
+};
+
 export default function DashboardManager() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [loading, setLoading] = useState(false);
@@ -100,7 +124,10 @@ export default function DashboardManager() {
     gasoil: 700,
   });
 
-  // Fournisseur
+  // Historique des prix
+  const [historiquePrix, setHistoriquePrix] = useState<HistoriquePrix[]>([]);
+
+  // Formulaire Fournisseur
   const [newFournisseur, setNewFournisseur] = useState({
     nom: "",
     prenom: "",
@@ -112,7 +139,28 @@ export default function DashboardManager() {
     telephone: "",
   });
 
-  // ICR
+  const [editFournisseur, setEditFournisseur] = useState<{
+    id: number | null;
+    nom: string;
+    prenom: string;
+    nom_societe: string;
+    adresse: string;
+    nif: string;
+    email: string;
+    telephone: string;
+  }>({
+    id: null,
+    nom: "",
+    prenom: "",
+    nom_societe: "",
+    adresse: "",
+    nif: "",
+    email: "",
+    telephone: "",
+  });
+  const [showEditFournisseur, setShowEditFournisseur] = useState(false);
+
+  // Formulaire ICR
   const [newIcr, setNewIcr] = useState({
     nom: "",
     prenom: "",
@@ -121,8 +169,31 @@ export default function DashboardManager() {
     telephone: "",
     matricule: "",
     nom_entreprise: "",
+    zone: "",
   });
 
+  const [editIcr, setEditIcr] = useState<{
+    id: number | null;
+    nom: string;
+    prenom: string;
+    email: string;
+    telephone: string;
+    matricule: string;
+    nom_entreprise: string;
+    zone: string;
+  }>({
+    id: null,
+    nom: "",
+    prenom: "",
+    email: "",
+    telephone: "",
+    matricule: "",
+    nom_entreprise: "",
+    zone: "",
+  });
+  const [showEditIcr, setShowEditIcr] = useState(false);
+
+  // Formulaire Responsable
   const [newResponsable, setNewResponsable] = useState({
     nom: "",
     prenom: "",
@@ -130,6 +201,21 @@ export default function DashboardManager() {
     password: "",
     telephone: "",
   });
+
+  const [editResponsable, setEditResponsable] = useState<{
+    id: number | null;
+    nom: string;
+    prenom: string;
+    email: string;
+    telephone: string;
+  }>({
+    id: null,
+    nom: "",
+    prenom: "",
+    email: "",
+    telephone: "",
+  });
+  const [showEditResponsable, setShowEditResponsable] = useState(false);
 
   // Dépôt
   const [newDepot, setNewDepot] = useState({
@@ -163,6 +249,7 @@ export default function DashboardManager() {
         stationsRes,
         prixRes,
         depotsRes,
+        historiqueRes,
       ] = await Promise.all([
         getFournisseurs(),
         getIcrs(),
@@ -170,6 +257,7 @@ export default function DashboardManager() {
         getStations(),
         getPrix(),
         getDepots(),
+        getHistoriquePrix(),
       ]);
 
       setFournisseurs(fournisseursRes.fournisseurs || []);
@@ -187,6 +275,8 @@ export default function DashboardManager() {
         essence: prixRes.essence || 750,
         gasoil: prixRes.gasoil || 700,
       });
+
+      setHistoriquePrix(historiqueRes?.historique || []);
     } catch {
       setError("Erreur de chargement des données");
     } finally {
@@ -203,7 +293,8 @@ export default function DashboardManager() {
     }, 3000);
   };
 
-  // Création Fournisseur
+  // ========== FOURNISSEURS ==========
+
   const handleCreateFournisseur = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setLoading(true);
@@ -228,7 +319,45 @@ export default function DashboardManager() {
     }
   };
 
-  // Création ICR
+  const openEditFournisseur = (f: Fournisseur) => {
+    setEditFournisseur({
+      id: f.id_fournisseur,
+      nom: f.user?.nom || "",
+      prenom: f.user?.prenom || "",
+      nom_societe: f.nom_societe,
+      adresse: f.adresse || "",
+      nif: f.nif || "",
+      email: f.user?.email || "",
+      telephone: f.user?.telephone || "",
+    });
+    setShowEditFournisseur(true);
+  };
+
+  const handleEditFournisseur = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editFournisseur.id) return;
+    setLoading(true);
+    try {
+      await updateFournisseur(editFournisseur.id, {
+        nom_societe: editFournisseur.nom_societe,
+        adresse: editFournisseur.adresse,
+        nif: editFournisseur.nif,
+        telephone: editFournisseur.telephone,
+        nom: editFournisseur.nom,
+        prenom: editFournisseur.prenom,
+      });
+      showMessage("Fournisseur modifié avec succès");
+      setShowEditFournisseur(false);
+      fetchData();
+    } catch (err: unknown) {
+      if (err instanceof Error) showMessage(err.message, true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ========== ICR ==========
+
   const handleCreateIcr = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setLoading(true);
@@ -243,6 +372,7 @@ export default function DashboardManager() {
         telephone: "",
         matricule: "",
         nom_entreprise: "",
+        zone: "",
       });
       fetchData();
     } catch (err: unknown) {
@@ -252,7 +382,44 @@ export default function DashboardManager() {
     }
   };
 
-  // Création Responsable Dépôt
+  const openEditIcr = (i: Icr) => {
+    setEditIcr({
+      id: i.id_icr,
+      nom: i.user?.nom || "",
+      prenom: i.user?.prenom || "",
+      email: i.user?.email || "",
+      telephone: i.user?.telephone || "",
+      matricule: i.matricule,
+      nom_entreprise: i.nom_entreprise || "",
+      zone: i.zone || "",
+    });
+    setShowEditIcr(true);
+  };
+
+  const handleEditIcr = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editIcr.id) return;
+    setLoading(true);
+    try {
+      await updateIcr(editIcr.id, {
+        nom: editIcr.nom,
+        prenom: editIcr.prenom,
+        telephone: editIcr.telephone,
+        zone: editIcr.zone,
+        nom_entreprise: editIcr.nom_entreprise,
+      });
+      showMessage("ICR modifié avec succès");
+      setShowEditIcr(false);
+      fetchData();
+    } catch (err: unknown) {
+      if (err instanceof Error) showMessage(err.message, true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ========== RESPONSABLES ==========
+
   const handleCreateResponsable = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setLoading(true);
@@ -274,7 +441,39 @@ export default function DashboardManager() {
     }
   };
 
-  // Création Dépôt (avec responsable obligatoire)
+  const openEditResponsable = (r: Responsable) => {
+    setEditResponsable({
+      id: r.id_responsable,
+      nom: r.user?.nom || "",
+      prenom: r.user?.prenom || "",
+      email: r.user?.email || "",
+      telephone: r.user?.telephone || "",
+    });
+    setShowEditResponsable(true);
+  };
+
+  const handleEditResponsable = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editResponsable.id) return;
+    setLoading(true);
+    try {
+      await updateResponsableDepot(editResponsable.id, {
+        nom: editResponsable.nom,
+        prenom: editResponsable.prenom,
+        telephone: editResponsable.telephone,
+      });
+      showMessage("Responsable modifié avec succès");
+      setShowEditResponsable(false);
+      fetchData();
+    } catch (err: unknown) {
+      if (err instanceof Error) showMessage(err.message, true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ========== DÉPÔTS ==========
+
   const handleCreateDepot = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setLoading(true);
@@ -294,7 +493,6 @@ export default function DashboardManager() {
     }
   };
 
-  // Changer le responsable d'un dépôt
   const handleChangerResponsable = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setLoading(true);
@@ -313,7 +511,8 @@ export default function DashboardManager() {
     }
   };
 
-  // Fixer les prix
+  // ========== PRIX ==========
+
   const handleFixerPrix = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setLoading(true);
@@ -324,6 +523,9 @@ export default function DashboardManager() {
         essence: prixForm.essence,
         gasoil: prixForm.gasoil,
       });
+      const historiqueRes = await getHistoriquePrix();
+      setHistoriquePrix(historiqueRes?.historique || []);
+      fetchData();
     } catch (err: unknown) {
       if (err instanceof Error) showMessage(err.message, true);
     } finally {
@@ -331,7 +533,8 @@ export default function DashboardManager() {
     }
   };
 
-  // Désactiver/Activer Fournisseur
+  // ========== TOGGLES ==========
+
   const toggleFournisseur = async (id: number, actif: boolean) => {
     try {
       if (actif) {
@@ -347,7 +550,6 @@ export default function DashboardManager() {
     }
   };
 
-  // Désactiver/Activer ICR
   const toggleIcr = async (id: number, actif: boolean) => {
     try {
       if (actif) {
@@ -363,7 +565,6 @@ export default function DashboardManager() {
     }
   };
 
-  // Désactiver/Activer Responsable
   const toggleResponsable = async (id: number, actif: boolean) => {
     try {
       if (actif) {
@@ -379,10 +580,41 @@ export default function DashboardManager() {
     }
   };
 
-  // Format date
   const formatDate = (dateString?: string) => {
     if (!dateString) return "-";
     return new Date(dateString).toLocaleDateString("fr-FR");
+  };
+
+  // ✅ Données pour le graphique
+  const chartData = historiquePrix.map((item) => ({
+    date: item.date,
+    essence: item.essence,
+    gasoil: item.gasoil,
+  }));
+
+  // ✅ Couleurs
+  const colors = {
+    essence: "#ff6b00",
+    gasoil: "#008751",
+    grid: "rgba(255,255,255,0.1)",
+    text: "#9ca3af",
+  };
+
+  // ✅ Tooltip personnalisé
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-[#111111] border border-white/10 rounded-lg p-3 backdrop-blur">
+          <p className="text-xs text-gray-400 mb-1">{label}</p>
+          {payload.map((entry: any, index: number) => (
+            <p key={index} className="text-sm" style={{ color: entry.color }}>
+              {entry.name}: <strong>{entry.value} FCFA</strong>
+            </p>
+          ))}
+        </div>
+      );
+    }
+    return null;
   };
 
   return (
@@ -412,6 +644,75 @@ export default function DashboardManager() {
         <div className="max-w-7xl mx-auto px-6 mt-4">
           <div className="bg-red-500/10 border border-red-500/30 text-red-300 px-4 py-3 rounded-xl">
             {error}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL MODIFICATION FOURNISSEUR */}
+      {showEditFournisseur && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur z-50 flex items-center justify-center p-4">
+          <div className="bg-[#111111] border border-white/10 rounded-2xl p-6 max-w-md w-full">
+            <h2 className="text-xl font-bold text-orange-400 mb-4">✏️ Modifier Fournisseur</h2>
+            <form onSubmit={handleEditFournisseur} className="space-y-3">
+              <input type="text" placeholder="Nom société" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={editFournisseur.nom_societe} onChange={(e) => setEditFournisseur({...editFournisseur, nom_societe: e.target.value})} required />
+              <div className="grid grid-cols-2 gap-2">
+                <input type="text" placeholder="Nom" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={editFournisseur.nom} onChange={(e) => setEditFournisseur({...editFournisseur, nom: e.target.value})} />
+                <input type="text" placeholder="Prénom" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={editFournisseur.prenom} onChange={(e) => setEditFournisseur({...editFournisseur, prenom: e.target.value})} />
+              </div>
+              <input type="email" placeholder="Email" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={editFournisseur.email} onChange={(e) => setEditFournisseur({...editFournisseur, email: e.target.value})} />
+              <input type="text" placeholder="Téléphone" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={editFournisseur.telephone} onChange={(e) => setEditFournisseur({...editFournisseur, telephone: e.target.value})} />
+              <input type="text" placeholder="Adresse" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={editFournisseur.adresse} onChange={(e) => setEditFournisseur({...editFournisseur, adresse: e.target.value})} />
+              <input type="text" placeholder="NIF" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={editFournisseur.nif} onChange={(e) => setEditFournisseur({...editFournisseur, nif: e.target.value})} />
+              <div className="flex gap-2">
+                <button type="submit" className="flex-1 bg-orange-500 text-black font-semibold py-2 rounded-lg">Modifier</button>
+                <button type="button" onClick={() => setShowEditFournisseur(false)} className="flex-1 bg-red-500/20 text-red-400 font-semibold py-2 rounded-lg">Annuler</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL MODIFICATION ICR */}
+      {showEditIcr && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur z-50 flex items-center justify-center p-4">
+          <div className="bg-[#111111] border border-white/10 rounded-2xl p-6 max-w-md w-full">
+            <h2 className="text-xl font-bold text-orange-400 mb-4">✏️ Modifier ICR</h2>
+            <form onSubmit={handleEditIcr} className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <input type="text" placeholder="Nom" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={editIcr.nom} onChange={(e) => setEditIcr({...editIcr, nom: e.target.value})} required />
+                <input type="text" placeholder="Prénom" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={editIcr.prenom} onChange={(e) => setEditIcr({...editIcr, prenom: e.target.value})} required />
+              </div>
+              <input type="email" placeholder="Email" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={editIcr.email} onChange={(e) => setEditIcr({...editIcr, email: e.target.value})} />
+              <input type="text" placeholder="Téléphone" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={editIcr.telephone} onChange={(e) => setEditIcr({...editIcr, telephone: e.target.value})} />
+              <input type="text" placeholder="Matricule" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={editIcr.matricule} onChange={(e) => setEditIcr({...editIcr, matricule: e.target.value})} />
+              <input type="text" placeholder="Nom entreprise" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={editIcr.nom_entreprise} onChange={(e) => setEditIcr({...editIcr, nom_entreprise: e.target.value})} />
+              <input type="text" placeholder="Zone" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={editIcr.zone} onChange={(e) => setEditIcr({...editIcr, zone: e.target.value})} />
+              <div className="flex gap-2">
+                <button type="submit" className="flex-1 bg-orange-500 text-black font-semibold py-2 rounded-lg">Modifier</button>
+                <button type="button" onClick={() => setShowEditIcr(false)} className="flex-1 bg-red-500/20 text-red-400 font-semibold py-2 rounded-lg">Annuler</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL MODIFICATION RESPONSABLE */}
+      {showEditResponsable && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur z-50 flex items-center justify-center p-4">
+          <div className="bg-[#111111] border border-white/10 rounded-2xl p-6 max-w-md w-full">
+            <h2 className="text-xl font-bold text-orange-400 mb-4">✏️ Modifier Responsable</h2>
+            <form onSubmit={handleEditResponsable} className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <input type="text" placeholder="Nom" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={editResponsable.nom} onChange={(e) => setEditResponsable({...editResponsable, nom: e.target.value})} required />
+                <input type="text" placeholder="Prénom" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={editResponsable.prenom} onChange={(e) => setEditResponsable({...editResponsable, prenom: e.target.value})} required />
+              </div>
+              <input type="email" placeholder="Email" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={editResponsable.email} onChange={(e) => setEditResponsable({...editResponsable, email: e.target.value})} />
+              <input type="text" placeholder="Téléphone" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={editResponsable.telephone} onChange={(e) => setEditResponsable({...editResponsable, telephone: e.target.value})} />
+              <div className="flex gap-2">
+                <button type="submit" className="flex-1 bg-orange-500 text-black font-semibold py-2 rounded-lg">Modifier</button>
+                <button type="button" onClick={() => setShowEditResponsable(false)} className="flex-1 bg-red-500/20 text-red-400 font-semibold py-2 rounded-lg">Annuler</button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -520,9 +821,14 @@ export default function DashboardManager() {
                       <div>NIF: {f.nif || "-"}</div>
                       <div>Inscrit le: {formatDate(f.created_at)}</div>
                     </div>
-                    <button onClick={() => toggleFournisseur(f.id_fournisseur, f.user?.statut ?? false)} className={`mt-2 px-3 py-1 rounded text-sm ${f.user?.statut ? 'bg-red-500/80' : 'bg-green-500/80'} text-white`}>
-                      {f.user?.statut ? 'Désactiver' : 'Activer'}
-                    </button>
+                    <div className="flex gap-2 mt-2">
+                      <button onClick={() => toggleFournisseur(f.id_fournisseur, f.user?.statut ?? false)} className={`px-3 py-1 rounded text-sm ${f.user?.statut ? 'bg-red-500/80' : 'bg-green-500/80'} text-white`}>
+                        {f.user?.statut ? 'Désactiver' : 'Activer'}
+                      </button>
+                      <button onClick={() => openEditFournisseur(f)} className="px-3 py-1 rounded text-sm bg-blue-500/80 text-white">
+                        ✏️ Modifier
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -545,6 +851,7 @@ export default function DashboardManager() {
                 <input type="tel" placeholder="Téléphone *" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={newIcr.telephone} onChange={(e) => setNewIcr({...newIcr, telephone: e.target.value})} required />
                 <input type="text" placeholder="Matricule *" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={newIcr.matricule} onChange={(e) => setNewIcr({...newIcr, matricule: e.target.value})} required />
                 <input type="text" placeholder="Nom de l'entreprise" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={newIcr.nom_entreprise} onChange={(e) => setNewIcr({...newIcr, nom_entreprise: e.target.value})} />
+                <input type="text" placeholder="Zone" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={newIcr.zone} onChange={(e) => setNewIcr({...newIcr, zone: e.target.value})} />
                 <button type="submit" disabled={loading} className="w-full bg-orange-500 text-black font-semibold py-2 rounded-lg">Créer</button>
               </form>
             </div>
@@ -559,10 +866,16 @@ export default function DashboardManager() {
                     <div className="text-sm text-gray-400">Email: {i.user?.email}</div>
                     <div className="text-sm text-gray-400">Téléphone: {i.user?.telephone || "-"}</div>
                     <div className="text-sm text-gray-400">Entreprise: {i.nom_entreprise || "-"}</div>
+                    <div className="text-sm text-gray-400">Zone: {i.zone || "-"}</div>
                     <div className="text-sm text-gray-400">Inscrit le: {formatDate(i.created_at)}</div>
-                    <button onClick={() => toggleIcr(i.id_icr, i.user?.statut ?? false)} className="mt-2 px-3 py-1 rounded text-sm bg-red-500/80 text-white">
-                      {i.user?.statut ? 'Désactiver' : 'Activer'}
-                    </button>
+                    <div className="flex gap-2 mt-2">
+                      <button onClick={() => toggleIcr(i.id_icr, i.user?.statut ?? false)} className={`px-3 py-1 rounded text-sm ${i.user?.statut ? 'bg-red-500/80' : 'bg-green-500/80'} text-white`}>
+                        {i.user?.statut ? 'Désactiver' : 'Activer'}
+                      </button>
+                      <button onClick={() => openEditIcr(i)} className="px-3 py-1 rounded text-sm bg-blue-500/80 text-white">
+                        ✏️ Modifier
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -602,9 +915,14 @@ export default function DashboardManager() {
                       </>
                     )}
                     <div className="text-sm text-gray-400">Inscrit le: {formatDate(r.created_at)}</div>
-                    <button onClick={() => toggleResponsable(r.id_responsable, r.user?.statut ?? false)} className="mt-2 px-3 py-1 rounded text-sm bg-red-500/80 text-white">
-                      {r.user?.statut ? 'Désactiver' : 'Activer'}
-                    </button>
+                    <div className="flex gap-2 mt-2">
+                      <button onClick={() => toggleResponsable(r.id_responsable, r.user?.statut ?? false)} className={`px-3 py-1 rounded text-sm ${r.user?.statut ? 'bg-red-500/80' : 'bg-green-500/80'} text-white`}>
+                        {r.user?.statut ? 'Désactiver' : 'Activer'}
+                      </button>
+                      <button onClick={() => openEditResponsable(r)} className="px-3 py-1 rounded text-sm bg-blue-500/80 text-white">
+                        ✏️ Modifier
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -615,7 +933,6 @@ export default function DashboardManager() {
         {/* DEPOTS TAB */}
         {activeTab === "depots" && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Formulaire création dépôt avec responsable */}
             <div className="bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur">
               <h2 className="text-xl font-bold mb-4 text-orange-400">➕ Nouveau dépôt</h2>
               <form onSubmit={handleCreateDepot} className="space-y-3">
@@ -638,7 +955,6 @@ export default function DashboardManager() {
               </form>
             </div>
 
-            {/* Formulaire changement responsable */}
             <div className="bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur">
               <h2 className="text-xl font-bold mb-4 text-orange-400">🔗 Changer le responsable</h2>
               <form onSubmit={handleChangerResponsable} className="space-y-3">
@@ -658,7 +974,6 @@ export default function DashboardManager() {
               </form>
             </div>
 
-            {/* Liste des dépôts */}
             <div className="lg:col-span-2 bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur">
               <h2 className="text-xl font-bold mb-4 text-orange-400">📋 Liste des dépôts</h2>
               <div className="space-y-2 max-h-96 overflow-y-auto">
@@ -674,90 +989,138 @@ export default function DashboardManager() {
           </div>
         )}
 
-        {/* PRIX TAB */}
-                {/* DEPOTS TAB */}
-        {activeTab === "depots" && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Formulaire création dépôt avec responsable */}
-            <div className="bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur">
-              <h2 className="text-xl font-bold mb-4 text-orange-400">➕ Nouveau dépôt</h2>
-              <form onSubmit={handleCreateDepot} className="space-y-3">
-                <input type="text" placeholder="Nom du dépôt *" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={newDepot.nom} onChange={(e) => setNewDepot({...newDepot, nom: e.target.value})} required />
-                <input type="text" placeholder="Localisation *" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={newDepot.localisation} onChange={(e) => setNewDepot({...newDepot, localisation: e.target.value})} required />
-                <select
-                  className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white"
-                  value={newDepot.id_responsable || ""}
-                  onChange={(e) => setNewDepot({...newDepot, id_responsable: e.target.value ? parseInt(e.target.value) : undefined})}
-                  required
-                >
-                  <option value="">Choisir un responsable *</option>
-                  {responsables.map((r) => (
-                    <option key={r.id_responsable} value={r.id_responsable}>
-                      {r.user?.prenom} {r.user?.nom}
-                    </option>
-                  ))}
-                </select>
-                <button type="submit" disabled={loading} className="w-full bg-orange-500 text-black font-semibold py-2 rounded-lg">Créer</button>
-              </form>
-            </div>
-
-            {/* Formulaire changement responsable */}
-            <div className="bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur">
-              <h2 className="text-xl font-bold mb-4 text-orange-400">🔗 Changer le responsable</h2>
-              <form onSubmit={handleChangerResponsable} className="space-y-3">
-                <select className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={affectation.id_depot} onChange={(e) => setAffectation({...affectation, id_depot: e.target.value})} required>
-                  <option value="">Choisir un dépôt</option>
-                  {depots.map((d) => (
-                    <option key={d.id_depot} value={d.id_depot}>{d.nom}</option>
-                  ))}
-                </select>
-                <select className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={affectation.id_responsable} onChange={(e) => setAffectation({...affectation, id_responsable: e.target.value})} required>
-                  <option value="">Choisir un responsable</option>
-                  {responsables.map((r) => (
-                    <option key={r.id_responsable} value={r.id_responsable}>{r.user?.prenom} {r.user?.nom}</option>
-                  ))}
-                </select>
-                <button type="submit" disabled={loading} className="w-full bg-blue-500 text-white font-semibold py-2 rounded-lg">Changer</button>
-              </form>
-            </div>
-
-            {/* Liste des dépôts */}
-            <div className="lg:col-span-2 bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur">
-              <h2 className="text-xl font-bold mb-4 text-orange-400">📋 Liste des dépôts</h2>
-              <div className="space-y-2 max-h-96 overflow-y-auto">
-                {depots.map((d) => (
-                  <div key={d.id_depot} className="border border-white/10 rounded-lg p-3">
-                    <div className="font-semibold">{d.nom}</div>
-                    <div className="text-sm text-gray-400">{d.localisation}</div>
-                    <div className="text-sm text-gray-400">Responsable: {d.responsable?.user?.prenom} {d.responsable?.user?.nom || "Non affecté"}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* PRIX TAB */}
+        {/* ✅ PRIX TAB AVEC GRAPHIQUE EN BARRES */}
         {activeTab === "prix" && (
-          <div className="max-w-md mx-auto">
-            <div className="bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur">
-              <h2 className="text-xl font-bold mb-4 text-orange-400">💰 Fixer les prix</h2>
-              <form onSubmit={handleFixerPrix} className="space-y-4">
-                <div>
-                  <label className="block text-sm mb-1 text-gray-300">Essence (FCFA/L)</label>
-                  <input type="number" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={prixForm.essence} onChange={(e) => setPrixForm({...prixForm, essence: parseInt(e.target.value)})} required />
-                </div>
-                <div>
-                  <label className="block text-sm mb-1 text-gray-300">Gasoil (FCFA/L)</label>
-                  <input type="number" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={prixForm.gasoil} onChange={(e) => setPrixForm({...prixForm, gasoil: parseInt(e.target.value)})} required />
-                </div>
-                <button type="submit" disabled={loading} className="w-full bg-orange-500 text-black font-semibold py-2 rounded-lg">Fixer les prix</button>
-              </form>
-              <div className="mt-6 pt-4 border-t border-white/10">
-                <h3 className="font-semibold mb-2 text-gray-300">Prix actuels</h3>
-                <div className="flex justify-between"><span>Essence:</span><span className="font-bold text-orange-400">{prix.essence} FCFA/L</span></div>
-                <div className="flex justify-between mt-1"><span>Gasoil:</span><span className="font-bold text-orange-400">{prix.gasoil} FCFA/L</span></div>
+          <div className="space-y-6">
+            {/* Ligne 1: Formulaire + Stats */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Formulaire fixation des prix */}
+              <div className="bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur">
+                <h2 className="text-xl font-bold mb-4 text-orange-400">💰 Fixer les prix</h2>
+                <form onSubmit={handleFixerPrix} className="space-y-4">
+                  <div>
+                    <label className="block text-sm mb-1 text-gray-300">Essence (FCFA/L)</label>
+                    <input type="number" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={prixForm.essence} onChange={(e) => setPrixForm({...prixForm, essence: parseInt(e.target.value)})} required />
+                  </div>
+                  <div>
+                    <label className="block text-sm mb-1 text-gray-300">Gasoil (FCFA/L)</label>
+                    <input type="number" className="w-full p-2 rounded-lg bg-black/50 border border-white/10 text-white" value={prixForm.gasoil} onChange={(e) => setPrixForm({...prixForm, gasoil: parseInt(e.target.value)})} required />
+                  </div>
+                  <button type="submit" disabled={loading} className="w-full bg-orange-500 text-black font-semibold py-2 rounded-lg">
+                    {loading ? "En cours..." : "Fixer les prix"}
+                  </button>
+                </form>
               </div>
+
+              {/* Statistiques rapides */}
+              <div className="bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur lg:col-span-2">
+                <h2 className="text-xl font-bold mb-4 text-orange-400">📊 Statistiques des prix</h2>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="p-3 bg-white/5 rounded-lg">
+                    <p className="text-xs text-gray-400">Prix actuel Essence</p>
+                    <p className="text-xl font-bold text-orange-400">{prix.essence} FCFA</p>
+                  </div>
+                  <div className="p-3 bg-white/5 rounded-lg">
+                    <p className="text-xs text-gray-400">Prix actuel Gasoil</p>
+                    <p className="text-xl font-bold text-green-400">{prix.gasoil} FCFA</p>
+                  </div>
+                  <div className="p-3 bg-white/5 rounded-lg">
+                    <p className="text-xs text-gray-400">Total mises à jour</p>
+                    <p className="text-xl font-bold text-blue-400">{historiquePrix.length}</p>
+                  </div>
+                  <div className="p-3 bg-white/5 rounded-lg">
+                    <p className="text-xs text-gray-400">Dernière mise à jour</p>
+                    <p className="text-sm font-bold text-yellow-400">
+                      {historiquePrix.length > 0 ? historiquePrix[historiquePrix.length - 1]?.date : "-"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Ligne 2: Graphique en barres */}
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur">
+              <h2 className="text-xl font-bold mb-4 text-orange-400">📊 Évolution des prix (Barres)</h2>
+
+              {historiquePrix.length === 0 ? (
+                <div className="h-80 flex items-center justify-center text-gray-400">
+                  <p>Aucune donnée disponible</p>
+                </div>
+              ) : (
+                <div className="h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={colors.grid} />
+                      <XAxis 
+                        dataKey="date" 
+                        stroke={colors.text}
+                        tick={{ fontSize: 10, fill: colors.text }}
+                        tickFormatter={(value) => value.split(' ')[0]}
+                      />
+                      <YAxis 
+                        stroke={colors.text}
+                        tick={{ fontSize: 10, fill: colors.text }}
+                        domain={['auto', 'auto']}
+                        tickFormatter={(value) => `${value} FCFA`}
+                      />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend 
+                        wrapperStyle={{ color: colors.text }}
+                        formatter={(value) => <span style={{ color: colors.text }}>{value}</span>}
+                      />
+                      <Bar 
+                        dataKey="essence" 
+                        fill={colors.essence} 
+                        name="Essence"
+                        radius={[4, 4, 0, 0]}
+                      />
+                      <Bar 
+                        dataKey="gasoil" 
+                        fill={colors.gasoil} 
+                        name="Gasoil"
+                        radius={[4, 4, 0, 0]}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {/* Tableau récapitulatif */}
+              {historiquePrix.length > 0 && (
+                <div className="mt-4 max-h-40 overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <thead className="text-gray-400 border-b border-white/10">
+                      <tr>
+                        <th className="text-left py-2">Date</th>
+                        <th className="text-left py-2">Essence (FCFA)</th>
+                        <th className="text-left py-2">Gasoil (FCFA)</th>
+                        <th className="text-left py-2">Évolution Essence</th>
+                        <th className="text-left py-2">Évolution Gasoil</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {historiquePrix.slice().reverse().map((item, index, arr) => {
+                        const prev = arr[index + 1];
+                        const evolEssence = prev ? item.essence - prev.essence : 0;
+                        const evolGasoil = prev ? item.gasoil - prev.gasoil : 0;
+                        return (
+                          <tr key={index} className="border-b border-white/5">
+                            <td className="py-1 text-gray-400">{item.date}</td>
+                            <td className="py-1 text-orange-400">{item.essence}</td>
+                            <td className="py-1 text-green-400">{item.gasoil}</td>
+                            <td className={`py-1 ${evolEssence > 0 ? 'text-green-400' : evolEssence < 0 ? 'text-red-400' : 'text-gray-400'}`}>
+                              {evolEssence !== 0 ? `${evolEssence > 0 ? '+' : ''}${evolEssence}` : '-'}
+                            </td>
+                            <td className={`py-1 ${evolGasoil > 0 ? 'text-green-400' : evolGasoil < 0 ? 'text-red-400' : 'text-gray-400'}`}>
+                              {evolGasoil !== 0 ? `${evolGasoil > 0 ? '+' : ''}${evolGasoil}` : '-'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -765,4 +1128,4 @@ export default function DashboardManager() {
       </div>  
     </div>   
   );        
-}          
+}
