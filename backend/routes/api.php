@@ -446,7 +446,8 @@ Route::middleware(['auth:sanctum', 'role:pompiste'])->prefix('pompiste')->group(
     Route::get('/reservations', [ReservationController::class, 'getReservationsPompiste']);
     Route::put('/reservation/{id}/servir', [ReservationController::class, 'servirReservation']);
 });
-
+// routes/api.php
+Route::post('/pompiste/vente/public', [PompisteController::class, 'saisirVentePublic']);
 // ==============================================
 // 🔹 ROUTES POUR CONSOMMATEUR
 // ==============================================

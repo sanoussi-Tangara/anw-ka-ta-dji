@@ -104,7 +104,7 @@ class PompisteController extends Controller
         }
     }
     
-    // 1. Saisir une vente
+    // 1. Saisir une vente (avec authentification)
     public function saisirVente(Request $request)
     {
         $user = auth()->user();
@@ -154,6 +154,60 @@ class PompisteController extends Controller
             'vente' => $vente,
             'prix_unitaire' => $prixUnitaire
         ], 201);
+    }
+    
+    // 1b. Saisir une vente PUBLIC (sans authentification - pour test)
+    public function saisirVentePublic(Request $request)
+    {
+        try {
+            $request->validate([
+                'pompiste_id' => 'required|exists:pompistes,id_pompiste',
+                'station_id' => 'required|exists:stations,id_station',
+                'type_carburant' => 'required|in:essence,gasoil',
+                'quantite' => 'required|numeric|min:0.1',
+                'montant' => 'required|numeric|min:0',
+                'mode_paiement' => 'required|in:especes,orange_money,mobicash,wave'
+            ]);
+
+            $prix = $this->getPrixManager();
+            $prixUnitaire = $request->type_carburant === 'essence' ? $prix['essence'] : $prix['gasoil'];
+
+            $vente = Vente::create([
+                'id_pompiste' => $request->pompiste_id,
+                'id_station' => $request->station_id,
+                'type_carburant' => $request->type_carburant,
+                'quantite' => $request->quantite,
+                'montant' => $request->montant,
+                'montant_total' => $request->montant,
+                'mode_paiement' => $request->mode_paiement,
+                'prix_unitaire' => $prixUnitaire,
+                'date_vente' => now(),
+                'periode' => $this->getPeriode()
+            ]);
+
+            $stock = Stock::where('id_station', $request->station_id)
+                ->where('type_carburant', $request->type_carburant)
+                ->first();
+
+            if ($stock) {
+                $stock->quantite -= $request->quantite;
+                $stock->date_mise_a_jour = now();
+                $stock->save();
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Vente enregistrée avec succès',
+                'vente' => $vente,
+                'prix_unitaire' => $prixUnitaire
+            ], 201);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], 500);
+        }
     }
     
     // 2. Récupérer les prix actuels
@@ -230,60 +284,61 @@ class PompisteController extends Controller
     
     // ========== RÉSERVATIONS ==========
     
-public function voirReservations(Request $request)
-{
-    $user = auth()->user();
-    $pompiste = Pompiste::with('station')->where('id_utilisateur', $user->id_utilisateur)->first();
-    
-    if (!$pompiste || !$pompiste->station) {
-        return response()->json(['reservations' => []]);
+    public function voirReservations(Request $request)
+    {
+        $user = auth()->user();
+        $pompiste = Pompiste::with('station')->where('id_utilisateur', $user->id_utilisateur)->first();
+        
+        if (!$pompiste || !$pompiste->station) {
+            return response()->json(['reservations' => []]);
+        }
+        
+        $reservations = DB::table('reservations')
+            ->leftJoin('consommateurs', 'reservations.id_consommateur', '=', 'consommateurs.id_consommateur')
+            ->leftJoin('users', 'consommateurs.id_utilisateur', '=', 'users.id_utilisateur')
+            ->where('reservations.id_station', $pompiste->station->id_station)
+            ->whereIn('reservations.statut', ['en_attente', 'payee'])
+            ->select(
+                'reservations.id_reservation',
+                'reservations.quantite',
+                'reservations.type_carburant',
+                'reservations.statut',
+                'reservations.date_reservation',
+                'reservations.date_retrait',
+                'reservations.montant_total',
+                'reservations.code_reservation',
+                'users.nom as consommateur_nom',
+                'users.prenom as consommateur_prenom',
+                'users.telephone as consommateur_telephone',
+                'users.email as consommateur_email'
+            )
+            ->orderBy('reservations.date_reservation', 'asc')
+            ->get();
+        
+        $formattedReservations = $reservations->map(function($reservation) {
+            return [
+                'id_reservation' => $reservation->id_reservation,
+                'quantite' => $reservation->quantite,
+                'type_carburant' => $reservation->type_carburant,
+                'statut' => $reservation->statut,
+                'date_reservation' => $reservation->date_reservation,
+                'date_retrait' => $reservation->date_retrait,
+                'montant_total' => $reservation->montant_total,
+                'code_reservation' => $reservation->code_reservation,
+                'consommateur' => [
+                    'nom' => $reservation->consommateur_nom,
+                    'prenom' => $reservation->consommateur_prenom,
+                    'telephone' => $reservation->consommateur_telephone,
+                    'email' => $reservation->consommateur_email,
+                ]
+            ];
+        });
+        
+        return response()->json([
+            'reservations' => $formattedReservations
+        ]);
     }
     
-    $reservations = DB::table('reservations')
-        ->leftJoin('consommateurs', 'reservations.id_consommateur', '=', 'consommateurs.id_consommateur')
-        ->leftJoin('users', 'consommateurs.id_utilisateur', '=', 'users.id_utilisateur')
-        ->where('reservations.id_station', $pompiste->station->id_station)
-        ->whereIn('reservations.statut', ['en_attente', 'payee'])
-        ->select(
-            'reservations.id_reservation',
-            'reservations.quantite',
-            'reservations.type_carburant',
-            'reservations.statut',
-            'reservations.date_reservation',
-            'reservations.date_retrait',
-            'reservations.montant_total',
-            'reservations.code_reservation',
-            'users.nom as consommateur_nom',
-            'users.prenom as consommateur_prenom',
-            'users.telephone as consommateur_telephone',
-            'users.email as consommateur_email'
-        )
-        ->orderBy('reservations.date_reservation', 'asc')
-        ->get();
-    
-    $formattedReservations = $reservations->map(function($reservation) {
-        return [
-            'id_reservation' => $reservation->id_reservation,
-            'quantite' => $reservation->quantite,
-            'type_carburant' => $reservation->type_carburant,
-            'statut' => $reservation->statut,
-            'date_reservation' => $reservation->date_reservation,
-            'date_retrait' => $reservation->date_retrait,
-            'montant_total' => $reservation->montant_total,
-            'code_reservation' => $reservation->code_reservation,
-            'consommateur' => [  // ← ICI : créer l'objet consommateur
-                'nom' => $reservation->consommateur_nom,
-                'prenom' => $reservation->consommateur_prenom,
-                'telephone' => $reservation->consommateur_telephone,
-                'email' => $reservation->consommateur_email,
-            ]
-        ];
-    });
-    
-    return response()->json([
-        'reservations' => $formattedReservations
-    ]);
-}
     public function marquerServie($id_reservation)
     {
         $reservation = Reservation::findOrFail($id_reservation);
