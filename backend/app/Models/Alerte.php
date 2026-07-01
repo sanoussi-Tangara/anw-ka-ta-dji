@@ -17,7 +17,9 @@ class Alerte extends Model
         'message',
         'date_creation',
         'statut',
-        'id_destinataire'
+        'id_destinataire',
+        'id_chauffeur',    // ✅ AJOUTÉ
+        'id_mission'       // ✅ AJOUTÉ
     ];
 
     protected $casts = [
@@ -32,6 +34,18 @@ class Alerte extends Model
         return $this->belongsTo(User::class, 'id_destinataire', 'id_utilisateur');
     }
 
+    // ✅ RELATION AVEC LE CHAUFFEUR
+    public function chauffeur()
+    {
+        return $this->belongsTo(Chauffeur::class, 'id_chauffeur');
+    }
+
+    // ✅ RELATION AVEC LA MISSION
+    public function mission()
+    {
+        return $this->belongsTo(Mission::class, 'id_mission');
+    }
+
     // ========== ACCESSEURS ==========
 
     // Couleur selon le type (pour l'affichage)
@@ -41,6 +55,7 @@ class Alerte extends Model
             'stock_faible' => 'orange',
             'ecart_livraison' => 'red',
             'probleme_consommateur' => 'yellow',
+            'incident_chauffeur' => 'red',      // ✅ AJOUTÉ
             default => 'blue'
         };
     }
@@ -52,7 +67,30 @@ class Alerte extends Model
             'stock_faible' => '📉',
             'ecart_livraison' => '⚠️',
             'probleme_consommateur' => '📢',
+            'incident_chauffeur' => '🚛',      // ✅ AJOUTÉ
             default => '🔔'
+        };
+    }
+
+    // Statut texte pour l'affichage
+    public function getStatutTexteAttribute()
+    {
+        return match($this->statut) {
+            'non_lue' => 'Non lue',
+            'lue' => 'Lue',
+            'traitee' => 'Traitée',
+            default => $this->statut
+        };
+    }
+
+    // Statut couleur
+    public function getStatutCouleurAttribute()
+    {
+        return match($this->statut) {
+            'non_lue' => 'red',
+            'lue' => 'yellow',
+            'traitee' => 'green',
+            default => 'gray'
         };
     }
 
@@ -121,6 +159,20 @@ class Alerte extends Model
             'date_creation' => now(),
             'statut' => 'non_lue',
             'id_destinataire' => $destinataireId
+        ]);
+    }
+
+    // ✅ CRÉER UNE ALERTE D'INCIDENT CHAUFFEUR
+    public static function incidentChauffeur($destinataireId, $chauffeurId, $message, $missionId = null)
+    {
+        return self::create([
+            'type' => 'incident_chauffeur',
+            'message' => $message,
+            'date_creation' => now(),
+            'statut' => 'non_lue',
+            'id_destinataire' => $destinataireId,
+            'id_chauffeur' => $chauffeurId,
+            'id_mission' => $missionId
         ]);
     }
 }

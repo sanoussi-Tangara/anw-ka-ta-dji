@@ -43,14 +43,14 @@ Route::middleware('auth:sanctum')->group(function () {
         // Routes spécifiques (sans paramètre) AVANT la route avec paramètre
         Route::get('/non-lues', [NotificationController::class, 'nonLues']);
         Route::get('/statistiques', [NotificationController::class, 'statistiques']);
-        Route::put('/lire-toutes', [NotificationController::class, 'marquerToutesLues']);
+        Route::patch('/lire-toutes', [NotificationController::class, 'marquerToutesLues']);
         Route::delete('/supprimer/toutes', [NotificationController::class, 'deleteAll']);
         Route::post('/envoyer', [NotificationController::class, 'envoyer']);
         
         // Route avec paramètre APRÈS les routes spécifiques
         Route::get('/', [NotificationController::class, 'index']);
         Route::get('/{id}', [NotificationController::class, 'show']);
-        Route::put('/{id}/lire', [NotificationController::class, 'marquerLue']);
+        Route::patch('/{id}/lire', [NotificationController::class, 'marquerLue']);
         Route::delete('/{id}', [NotificationController::class, 'destroy']);
     });
     
@@ -58,12 +58,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('stations')->group(function () {
         // CRUD (création, modification, suppression)
         Route::post('/', [StationController::class, 'store']);
-        Route::put('{id_station}', [StationController::class, 'update']);
+        Route::patch('{id_station}', [StationController::class, 'update']);
         Route::delete('{id_station}', [StationController::class, 'destroy']);
         
         // Stocks
         Route::get('stocks/{id_station}', [StationController::class, 'voirStocks']);
-        Route::put('stocks/{id_station}', [StationController::class, 'updateStock']);
+        Route::patch('stocks/{id_station}', [StationController::class, 'updateStock']);
         Route::get('disponibilite/{id_station}', [StationController::class, 'checkDisponibilite']);
         
         // Gérant
@@ -85,12 +85,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/', [DepotController::class, 'index']);
         Route::get('{id_depot}', [DepotController::class, 'show']);
         Route::post('/', [DepotController::class, 'store']);
-        Route::put('{id_depot}', [DepotController::class, 'update']);
+        Route::patch('{id_depot}', [DepotController::class, 'update']);
         Route::delete('{id_depot}', [DepotController::class, 'destroy']);
         
         // Stocks
         Route::get('stocks/{id_depot}', [DepotController::class, 'voirStocks']);
-        Route::put('stocks/{id_depot}', [DepotController::class, 'updateStock']);
+        Route::patch('stocks/{id_depot}', [DepotController::class, 'updateStock']);
         Route::get('disponibilite/{id_depot}/{type_carburant}', [DepotController::class, 'checkDisponibilite']);
         
         // Bons
@@ -110,34 +110,34 @@ Route::middleware('auth:sanctum')->group(function () {
     });
     
     // ========== ROUTES RESPONSABLE DÉPÔT ==========
-Route::prefix('responsable-depot')->group(function () {
-    // Gestion des comptes (manager)
-    Route::post('creer', [ResponsableDepotController::class, 'creer']);
-    Route::get('liste', [ResponsableDepotController::class, 'index']);
-    Route::get('voir/{id}', [ResponsableDepotController::class, 'show']);
-    Route::put('desactiver/{id}', [ResponsableDepotController::class, 'desactiver']);
-    Route::put('activer/{id}', [ResponsableDepotController::class, 'activer']);
-    
-    
-    // Gestion des bons
-    Route::get('bons-recus/{id_responsable}', [ResponsableDepotController::class, 'bonsRecus']);
-    Route::get('bon/{id_bon}', [ResponsableDepotController::class, 'detailBon']);
-    
-    // Chargement
-    Route::post('verifier-code', [ResponsableDepotController::class, 'verifierCode']);
-    Route::post('autoriser-chargement', [ResponsableDepotController::class, 'autoriserChargement']);
-    Route::post('terminer-chargement', [ResponsableDepotController::class, 'terminerChargement']);
-    
-    // Stocks - AJOUTEZ LA ROUTE PUT ICI
-    Route::get('stock/{id_responsable}', [ResponsableDepotController::class, 'voirStock']);
-    Route::put('stock/{id_responsable}', [ResponsableDepotController::class, 'updateStock']);  // ← ROUTE MANQUANTE
-    Route::get('alertes/{id_responsable}', [ResponsableDepotController::class, 'alertesStock']);  // ← AJOUTEZ AUSSI CELLE-CI
-    Route::get('historique-sorties/{id_responsable}', [ResponsableDepotController::class, 'historiqueSorties']);
-       Route::put('seuil-alerte/{id_responsable}', [ResponsableDepotController::class, 'updateSeuilAlerte']); 
-    // Profil
-    Route::get('profil/{id_responsable}', [ResponsableDepotController::class, 'profil']);
-    Route::put('profil/{id_responsable}', [ResponsableDepotController::class, 'updateProfil']);
-});
+    Route::prefix('responsable-depot')->group(function () {
+        // Gestion des comptes (manager)
+        Route::post('creer', [ResponsableDepotController::class, 'creer']);
+        Route::get('liste', [ResponsableDepotController::class, 'index']);
+        Route::get('voir/{id}', [ResponsableDepotController::class, 'show']);
+        Route::patch('desactiver/{id}', [ResponsableDepotController::class, 'desactiver']);
+        Route::patch('activer/{id}', [ResponsableDepotController::class, 'activer']);
+        
+        // Gestion des bons
+        Route::get('bons-recus/{id_responsable}', [ResponsableDepotController::class, 'bonsRecus']);
+        Route::get('bon/{id_bon}', [ResponsableDepotController::class, 'detailBon']);
+        
+        // Chargement
+        Route::post('verifier-code', [ResponsableDepotController::class, 'verifierCode']);
+        Route::post('autoriser-chargement', [ResponsableDepotController::class, 'autoriserChargement']);
+        Route::post('terminer-chargement', [ResponsableDepotController::class, 'terminerChargement']);
+        
+        // Stocks
+        Route::get('stock/{id_responsable}', [ResponsableDepotController::class, 'voirStock']);
+        Route::patch('stock/{id_responsable}', [ResponsableDepotController::class, 'updateStock']);
+        Route::get('alertes/{id_responsable}', [ResponsableDepotController::class, 'alertesStock']);
+        Route::get('historique-sorties/{id_responsable}', [ResponsableDepotController::class, 'historiqueSorties']);
+        Route::patch('seuil-alerte/{id_responsable}', [ResponsableDepotController::class, 'updateSeuilAlerte']);
+        
+        // Profil
+        Route::get('profil/{id_responsable}', [ResponsableDepotController::class, 'profil']);
+        Route::patch('profil/{id_responsable}', [ResponsableDepotController::class, 'updateProfil']);
+    });
 });
 
 // ========== NOTIFICATIONS POUR RESPONSABLE DÉPÔT ==========
@@ -145,8 +145,8 @@ Route::middleware(['auth:sanctum', 'role:responsable_depot'])->prefix('responsab
     Route::get('/notifications', [ResponsableDepotController::class, 'getNotifications']);
     Route::get('/notifications/non-lues', [ResponsableDepotController::class, 'getNotificationsNonLues']);
     Route::get('/notifications/statistiques', [ResponsableDepotController::class, 'getNotificationsStatistiques']);
-    Route::put('/notifications/{id}/lire', [ResponsableDepotController::class, 'marquerNotificationLue']);
-    Route::put('/notifications/lire-toutes', [ResponsableDepotController::class, 'marquerToutesNotificationsLues']);
+    Route::patch('/notifications/{id}/lire', [ResponsableDepotController::class, 'marquerNotificationLue']);
+    Route::patch('/notifications/lire-toutes', [ResponsableDepotController::class, 'marquerToutesNotificationsLues']);
 });
 
 // ==============================================
@@ -172,7 +172,6 @@ Route::prefix('fournisseur')->middleware(['auth:sanctum', 'role:fournisseur'])->
     Route::get('icrs', [FournisseurController::class, 'listeIcrs']);
     Route::get('depots', [FournisseurController::class, 'listeDepots']);
     Route::get('bon/details/{id}', [FournisseurController::class, 'getDetailsBon']);
-
 });
 
 // ==============================================
@@ -182,24 +181,27 @@ Route::prefix('manager')->middleware(['auth:sanctum', 'role:manager'])->group(fu
     
     // Gestion des fournisseurs
     Route::post('fournisseur/creer', [ManagerController::class, 'creerFournisseur']);
-    Route::put('fournisseur/modifier/{id_fournisseur}', [ManagerController::class, 'modifierFournisseur']);
+    Route::patch('fournisseur/modifier/{id_fournisseur}', [ManagerController::class, 'modifierFournisseur']);
     Route::get('fournisseurs', [ManagerController::class, 'listerFournisseurs']);
-    Route::put('fournisseur/desactiver/{id_fournisseur}', [ManagerController::class, 'desactiverFournisseur']);
-    Route::put('fournisseur/activer/{id_fournisseur}', [ManagerController::class, 'activerFournisseur']);
+    // ✅ CORRECTION : PUT → PATCH pour désactiver/activer
+    Route::patch('fournisseur/desactiver/{id_fournisseur}', [ManagerController::class, 'desactiverFournisseur']);
+    Route::patch('fournisseur/activer/{id_fournisseur}', [ManagerController::class, 'activerFournisseur']);
     
     // Gestion des ICR
     Route::post('icr/creer', [ManagerController::class, 'creerIcr']);
-    Route::put('icr/modifier/{id_icr}', [ManagerController::class, 'modifierIcr']);
+    Route::patch('icr/modifier/{id_icr}', [ManagerController::class, 'modifierIcr']);
     Route::get('icrs', [ManagerController::class, 'listerIcr']);
-    Route::put('icr/desactiver/{id_icr}', [ManagerController::class, 'desactiverIcr']);
-    Route::put('icr/activer/{id_icr}', [ManagerController::class, 'activerIcr']);
+    // ✅ CORRECTION : PUT → PATCH pour désactiver/activer
+    Route::patch('icr/desactiver/{id_icr}', [ManagerController::class, 'desactiverIcr']);
+    Route::patch('icr/activer/{id_icr}', [ManagerController::class, 'activerIcr']);
     
     // Gestion des responsables dépôt
     Route::post('responsable/creer', [ManagerController::class, 'creerResponsableDepot']);
-    Route::put('responsable/modifier/{id_responsable}', [ManagerController::class, 'modifierResponsableDepot']);
+    Route::patch('responsable/modifier/{id_responsable}', [ManagerController::class, 'modifierResponsableDepot']);
     Route::get('responsables', [ManagerController::class, 'listerResponsablesDepot']);
-    Route::put('responsable/desactiver/{id_responsable}', [ManagerController::class, 'desactiverResponsableDepot']);
-    Route::put('responsable/activer/{id_responsable}', [ManagerController::class, 'activerResponsableDepot']);
+    // ✅ CORRECTION : PUT → PATCH pour désactiver/activer
+    Route::patch('responsable/desactiver/{id_responsable}', [ManagerController::class, 'desactiverResponsableDepot']);
+    Route::patch('responsable/activer/{id_responsable}', [ManagerController::class, 'activerResponsableDepot']);
 
     // Gestion des dépôts
     Route::post('depot/creer', [ManagerController::class, 'creerDepot']);
@@ -228,8 +230,11 @@ Route::prefix('manager')->middleware(['auth:sanctum', 'role:manager'])->group(fu
     Route::post('prix/fixer', [ManagerController::class, 'fixerPrix']);
     Route::get('prix', [ManagerController::class, 'getPrix']);
     Route::get('prix/historique', [ManagerController::class, 'historiquePrix']);
-});
 
+    // Gestion des dépôts - AJOUTER
+Route::patch('depot/modifier/{id_depot}', [ManagerController::class, 'modifierDepot']);
+Route::delete('depot/supprimer/{id_depot}', [ManagerController::class, 'supprimerDepot']);
+});
 
 // ==============================================
 // 🔹 ROUTES ICR (Inspecteur Commercial de Réseaux)
@@ -240,33 +245,33 @@ Route::prefix('icr')->middleware(['auth:sanctum', 'role:icr'])->group(function (
     // GESTION DES GÉRANTS
     Route::get('gerants/{id_icr}', [IcrController::class, 'voirGerants']);
     Route::post('gerant/creer', [IcrController::class, 'creerGerant']);
-    Route::put('gerant/modifier/{id_gerant}', [IcrController::class, 'modifierGerant']);
-    Route::put('gerant/desactiver/{id_gerant}', [IcrController::class, 'desactiverGerant']);
-    Route::put('gerant/activer/{id_gerant}', [IcrController::class, 'activerGerant']);
+    Route::patch('gerant/modifier/{id_gerant}', [IcrController::class, 'modifierGerant']);
+    Route::patch('gerant/desactiver/{id_gerant}', [IcrController::class, 'desactiverGerant']);
+    Route::patch('gerant/activer/{id_gerant}', [IcrController::class, 'activerGerant']);
     Route::get('gerant/{id_gerant}', [IcrController::class, 'detailGerant']);
     
     // GESTION DES CHAUFFEURS
     Route::get('chauffeurs/{id_icr}', [IcrController::class, 'voirChauffeurs']);
     Route::post('chauffeur/creer', [IcrController::class, 'creerChauffeur']);
-    Route::put('chauffeur/modifier/{id_chauffeur}', [IcrController::class, 'modifierChauffeur']);
-    Route::put('chauffeur/desactiver/{id_chauffeur}', [IcrController::class, 'desactiverChauffeur']);
-    Route::put('chauffeur/activer/{id_chauffeur}', [IcrController::class, 'activerChauffeur']);
+    Route::patch('chauffeur/modifier/{id_chauffeur}', [IcrController::class, 'modifierChauffeur']);
+    Route::patch('chauffeur/desactiver/{id_chauffeur}', [IcrController::class, 'desactiverChauffeur']);
+    Route::patch('chauffeur/activer/{id_chauffeur}', [IcrController::class, 'activerChauffeur']);
     Route::get('chauffeur/{id_chauffeur}', [IcrController::class, 'detailChauffeur']);
     
     // GESTION DES STATIONS
     Route::get('stations', [IcrController::class, 'voirStations']);
     Route::post('station/creer', [IcrController::class, 'creerStation']);
-    Route::put('station/modifier/{id_station}', [IcrController::class, 'modifierStation']);
-    Route::put('station/desactiver/{id_station}', [IcrController::class, 'desactiverStation']);
-    Route::put('station/activer/{id_station}', [IcrController::class, 'activerStation']);
+    Route::patch('station/modifier/{id_station}', [IcrController::class, 'modifierStation']);
+    Route::patch('station/desactiver/{id_station}', [IcrController::class, 'desactiverStation']);
+    Route::patch('station/activer/{id_station}', [IcrController::class, 'activerStation']);
     Route::get('station/{id_station}', [IcrController::class, 'detailStation']);
     
     // GESTION DES CAMIONS
     Route::get('camions', [IcrController::class, 'voirCamions']);
     Route::post('camion/creer', [IcrController::class, 'creerCamion']);
-    Route::put('camion/modifier/{id_camion}', [IcrController::class, 'modifierCamion']);
-    Route::put('camion/desactiver/{id_camion}', [IcrController::class, 'desactiverCamion']);
-    Route::put('camion/activer/{id_camion}', [IcrController::class, 'activerCamion']);
+    Route::patch('camion/modifier/{id_camion}', [IcrController::class, 'modifierCamion']);
+    Route::patch('camion/desactiver/{id_camion}', [IcrController::class, 'desactiverCamion']);
+    Route::patch('camion/activer/{id_camion}', [IcrController::class, 'activerCamion']);
     Route::get('camion/{id_camion}', [IcrController::class, 'detailCamion']);
     
     // GESTION DES BONS
@@ -277,9 +282,14 @@ Route::prefix('icr')->middleware(['auth:sanctum', 'role:icr'])->group(function (
     Route::post('mission/organiser', [IcrController::class, 'organiserMission']);
     Route::get('missions/{id_icr}', [IcrController::class, 'voirMissions']);
     Route::get('mission/{id_mission}', [IcrController::class, 'detailMission']);
-    Route::put('mission/annuler/{id_mission}', [IcrController::class, 'annulerMission']);
-    Route::put('mission/demarrer/{id_mission}', [IcrController::class, 'demarrerMission']);
-    Route::put('mission/terminer/{id_mission}', [IcrController::class, 'terminerMission']);
+    Route::patch('mission/annuler/{id_mission}', [IcrController::class, 'annulerMission']);
+    Route::patch('mission/demarrer/{id_mission}', [IcrController::class, 'demarrerMission']);
+    Route::patch('mission/terminer/{id_mission}', [IcrController::class, 'terminerMission']);
+
+     // ✅ INCIDENTS
+    Route::get('incidents', [IcrController::class, 'voirIncidents']);
+    Route::get('incident/{id_incident}', [IcrController::class, 'detailIncident']);
+    Route::patch('incident/{id_incident}/statut', [IcrController::class, 'updateIncidentStatus']);
     
     // CHARGEMENT ET CERTIFICAT
     Route::post('chargement/enregistrer', [IcrController::class, 'enregistrerChargement']);
@@ -297,11 +307,9 @@ Route::prefix('icr')->middleware(['auth:sanctum', 'role:icr'])->group(function (
     
     // PROFIL ET DASHBOARD
     Route::get('profil/{id_icr}', [IcrController::class, 'profil']);
-    Route::put('profil/{id_icr}', [IcrController::class, 'updateProfil']);
+    Route::patch('profil/{id_icr}', [IcrController::class, 'updateProfil']);
     Route::get('dashboard/{id_icr}', [IcrController::class, 'dashboard']);
 });
-
-
 
 // ==============================================
 // 🔹 ROUTES POUR CERTIFICATS (API)
@@ -323,7 +331,8 @@ Route::middleware('auth:sanctum')->prefix('certificats')->group(function () {
     Route::get('/{id_certificat}/download-pdf', [CertificatController::class, 'downloadPdf']);
     Route::get('/{id_certificat}/view-pdf', [CertificatController::class, 'viewPdf']);
     Route::delete('/{id_certificat}', [CertificatController::class, 'destroy']);
-     // NOUVELLES ROUTES - Signature par mission
+    
+    // NOUVELLES ROUTES - Signature par mission
     Route::post('/signer-icr', [CertificatController::class, 'signerParIcr']);
     Route::post('/signer-chauffeur', [CertificatController::class, 'signerParChauffeur']);
     
@@ -332,12 +341,11 @@ Route::middleware('auth:sanctum')->prefix('certificats')->group(function () {
     Route::get('/statut-signature/{id_mission}', [CertificatController::class, 'getStatutSignature']);
 });
 
-
 // ========== SUIVI GPS ==========
 
 // Chauffeur : mettre à jour sa position
 Route::middleware(['auth:sanctum', 'role:chauffeur'])->group(function () {
-    Route::put('/chauffeur/mission/{id_mission}/position', [MissionController::class, 'updatePosition']);
+    Route::patch('/chauffeur/mission/{id_mission}/position', [MissionController::class, 'updatePosition']);
     Route::get('/chauffeur/mission-en-cours', [MissionController::class, 'getMissionEnCours']);
 });
 
@@ -346,13 +354,12 @@ Route::middleware(['auth:sanctum', 'role:icr'])->group(function () {
     Route::get('/icr/mission/{id_mission}/position', [MissionController::class, 'getPosition']);
 });
 
-
 // ========== CHAUFFEUR ==========
 Route::middleware(['auth:sanctum', 'role:chauffeur'])->prefix('chauffeur')->group(function () {
     // Dashboard
     Route::get('/dashboard/{id_chauffeur}', [ChauffeurController::class, 'dashboard']);
     Route::get('/profil/{id_chauffeur}', [ChauffeurController::class, 'profil']);
-    Route::put('/profil/{id_chauffeur}', [ChauffeurController::class, 'updateProfil']);
+    Route::patch('/profil/{id_chauffeur}', [ChauffeurController::class, 'updateProfil']);
     
     // Missions
     Route::get('/missions/{id_chauffeur}', [ChauffeurController::class, 'voirMissions']);
@@ -361,6 +368,7 @@ Route::middleware(['auth:sanctum', 'role:chauffeur'])->prefix('chauffeur')->grou
     Route::post('/mission/{id_mission}/terminer', [ChauffeurController::class, 'terminerMission']);
     Route::get('/mission/{id_mission}/details', [ChauffeurController::class, 'detailsMission']);
     Route::get('/missions-planifiees/{id_chauffeur}', [ChauffeurController::class, 'missionsPlanifiees']);
+    
     // Livraisons
     Route::get('/livraisons/{id_chauffeur}', [ChauffeurController::class, 'livraisonsAEffectuer']);
     Route::post('/livraison/valider', [ChauffeurController::class, 'validerLivraison']);
@@ -373,13 +381,12 @@ Route::middleware(['auth:sanctum', 'role:chauffeur'])->prefix('chauffeur')->grou
     Route::post('/incident/signaler', [ChauffeurController::class, 'signalerIncident']);
 });
 
-
 // ========== GÉRANT DE STATION ==========
 Route::middleware(['auth:sanctum', 'role:gerant'])->prefix('gerant')->group(function () {
     
     // Profil
     Route::get('/profil/{id_gerant}', [GerantController::class, 'profil']);
-    Route::put('/profil/{id_gerant}', [GerantController::class, 'updateProfil']);
+    Route::patch('/profil/{id_gerant}', [GerantController::class, 'updateProfil']);
     
     // Dashboard
     Route::get('/dashboard/{id_gerant}', [GerantController::class, 'dashboard']);
@@ -387,9 +394,9 @@ Route::middleware(['auth:sanctum', 'role:gerant'])->prefix('gerant')->group(func
     // Pompistes
     Route::get('/pompistes/{id_gerant}', [GerantController::class, 'voirPompistes']);
     Route::post('/pompiste/creer', [GerantController::class, 'creerPompiste']);
-    Route::put('/pompiste/modifier/{id_pompiste}', [GerantController::class, 'modifierPompiste']);
-    Route::put('/pompiste/desactiver/{id_pompiste}', [GerantController::class, 'desactiverPompiste']);
-    Route::put('/pompiste/activer/{id_pompiste}', [GerantController::class, 'activerPompiste']);
+    Route::patch('/pompiste/modifier/{id_pompiste}', [GerantController::class, 'modifierPompiste']);
+    Route::patch('/pompiste/desactiver/{id_pompiste}', [GerantController::class, 'desactiverPompiste']);
+    Route::patch('/pompiste/activer/{id_pompiste}', [GerantController::class, 'activerPompiste']);
     
     // Stocks (station)
     Route::get('/stocks/{id_gerant}', [GerantController::class, 'voirStock']);
@@ -404,18 +411,19 @@ Route::middleware(['auth:sanctum', 'role:gerant'])->prefix('gerant')->group(func
     
     // Alertes
     Route::get('/alertes/{id_gerant}', [GerantController::class, 'alertesStock']);
-    Route::put('/alerte/lire/{id_alerte}', [GerantController::class, 'marquerAlerteLue']);
+    Route::patch('/alerte/lire/{id_alerte}', [GerantController::class, 'marquerAlerteLue']);
     Route::get('/alertes/verifier/{id_gerant}', [GerantController::class, 'verifierAlertesStock']);
 
-     Route::get('/notifications', [NotificationController::class, 'index']);
+    Route::get('/notifications', [NotificationController::class, 'index']);
     Route::get('/notifications/non-lues', [NotificationController::class, 'nonLues']);
-    Route::put('/notification/lire/{id}', [NotificationController::class, 'marquerLue']);
-    Route::put('/notifications/lire-toutes', [NotificationController::class, 'marquerToutesLues']);
+    Route::patch('/notification/lire/{id}', [NotificationController::class, 'marquerLue']);
+    Route::patch('/notifications/lire-toutes', [NotificationController::class, 'marquerToutesLues']);
     Route::delete('/notification/{id}', [NotificationController::class, 'destroy']);
     Route::delete('/notifications/supprimer/toutes', [NotificationController::class, 'deleteAll']);
-//stock
+    
+    // Stock
     Route::get('/stocks/{id_gerant}', [GerantController::class, 'voirStock']);
-    Route::put('/stocks/{id_gerant}/seuil', [GerantController::class, 'updateSeuilAlerte']); // ← AJOUTE CETTE LIGNE
+    Route::patch('/stocks/{id_gerant}/seuil', [GerantController::class, 'updateSeuilAlerte']);
 });
 
 // ========== POMPISTE ==========
@@ -423,7 +431,7 @@ Route::middleware(['auth:sanctum', 'role:pompiste'])->prefix('pompiste')->group(
     
     // Profil
     Route::get('/profil', [PompisteController::class, 'profil']);
-    Route::put('/profil', [PompisteController::class, 'updateProfil']);
+    Route::patch('/profil', [PompisteController::class, 'updateProfil']);
     
     // Ventes
     Route::post('/vente', [PompisteController::class, 'saisirVente']);
@@ -436,7 +444,7 @@ Route::middleware(['auth:sanctum', 'role:pompiste'])->prefix('pompiste')->group(
     
     // Réservations
     Route::get('/reservations', [PompisteController::class, 'voirReservations']);
-    Route::put('/reservation/{id}/servir', [PompisteController::class, 'marquerServie']);
+    Route::patch('/reservation/{id}/servir', [PompisteController::class, 'marquerServie']);
     
     // Fin de journée
     Route::get('/cloture', [PompisteController::class, 'clotureCaisse']);
@@ -444,10 +452,12 @@ Route::middleware(['auth:sanctum', 'role:pompiste'])->prefix('pompiste')->group(
     // Synchronisation hors-ligne
     Route::post('/synchroniser', [PompisteController::class, 'synchroniserVentes']);
     Route::get('/reservations', [ReservationController::class, 'getReservationsPompiste']);
-    Route::put('/reservation/{id}/servir', [ReservationController::class, 'servirReservation']);
+    Route::patch('/reservation/{id}/servir', [ReservationController::class, 'servirReservation']);
 });
+
 // routes/api.php
 Route::post('/pompiste/vente/public', [PompisteController::class, 'saisirVentePublic']);
+
 // ==============================================
 // 🔹 ROUTES POUR CONSOMMATEUR
 // ==============================================
@@ -456,15 +466,15 @@ Route::middleware(['auth:sanctum', 'role:consommateur'])->group(function () {
     
     // ========== PROFIL ==========
     Route::get('/consommateur/profil', [ConsommateurController::class, 'profil']);
-    Route::put('/consommateur/profil', [ConsommateurController::class, 'updateProfil']);
+    Route::patch('/consommateur/profil', [ConsommateurController::class, 'updateProfil']);
     
     // ========== RÉSERVATIONS ==========
     Route::get('/reservations', [ReservationController::class, 'index']);
     Route::post('/reservations', [ReservationController::class, 'store']);
     Route::get('/reservation/{id}', [ReservationController::class, 'show']);
-    Route::put('/reservation/{id}/annuler', [ReservationController::class, 'annuler']);
+    Route::patch('/reservation/{id}/annuler', [ReservationController::class, 'annuler']);
     // Paiement d'une réservation
-Route::post('/reservation/payer', [ReservationController::class, 'payer']);
+    Route::post('/reservation/payer', [ReservationController::class, 'payer']);
     
     // ========== PAIEMENTS ==========
     Route::post('/paiements/simuler', [PaiementController::class, 'simuler']);
@@ -475,7 +485,7 @@ Route::post('/reservation/payer', [ReservationController::class, 'payer']);
     
     // ========== NOTIFICATIONS ==========
     Route::get('/notifications', [NotificationController::class, 'index']);
-    Route::put('/notifications/{id}/lire', [NotificationController::class, 'marquerLue']);
+    Route::patch('/notifications/{id}/lire', [NotificationController::class, 'marquerLue']);
 });
 
 // ==============================================

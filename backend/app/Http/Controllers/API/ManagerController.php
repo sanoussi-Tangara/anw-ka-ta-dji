@@ -15,16 +15,11 @@ use App\Models\Station;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Schema;
 use Carbon\Carbon;
 
 class ManagerController extends Controller
 {
-    // public function __construct()
-    // {
-    //     $this->middleware('auth:sanctum');
-    //     $this->middleware('role:manager');
-    // }
-
     // ==============================================
     // 🔹 GESTION DES FOURNISSEURS
     // ==============================================
@@ -49,7 +44,8 @@ class ManagerController extends Controller
                 'email' => $request->email,
                 'password' => Hash::make($request->password),
                 'telephone' => $request->telephone,
-                'role' => 'fournisseur'
+                'role' => 'fournisseur',
+                'statut' => true
             ]);
 
             $fournisseur = Fournisseur::create([
@@ -68,25 +64,35 @@ class ManagerController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Erreur lors de la création'], 500);
+            return response()->json(['message' => 'Erreur lors de la création: ' . $e->getMessage()], 500);
         }
     }
 
+    // ✅ MODIFICATION FOURNISSEUR - AMÉLIORÉE
     public function modifierFournisseur(Request $request, $id_fournisseur)
     {
-        $fournisseur = Fournisseur::findOrFail($id_fournisseur);
-        $user = $fournisseur->user;
-
-        $request->validate([
-            'nom_societe' => 'sometimes|string|max:100',
-            'adresse' => 'nullable|string|max:200',
-            'nif' => 'nullable|string|max:50',
-            'telephone' => 'nullable|string|max:20'
-        ]);
-
-        DB::beginTransaction();
-
         try {
+            $fournisseur = Fournisseur::with('user')->find($id_fournisseur);
+            
+            if (!$fournisseur) {
+                return response()->json(['message' => 'Fournisseur non trouvé'], 404);
+            }
+            
+            $user = $fournisseur->user;
+
+            $request->validate([
+                'nom_societe' => 'sometimes|string|max:100',
+                'adresse' => 'nullable|string|max:200',
+                'nif' => 'nullable|string|max:50',
+                'telephone' => 'nullable|string|max:20',
+                'nom' => 'nullable|string|max:100',
+                'prenom' => 'nullable|string|max:100',
+                'email' => 'sometimes|email|unique:users,email,' . $user->id_utilisateur . ',id_utilisateur'
+            ]);
+
+            DB::beginTransaction();
+
+            // Mettre à jour le fournisseur
             if ($request->has('nom_societe')) {
                 $fournisseur->nom_societe = $request->nom_societe;
             }
@@ -98,10 +104,20 @@ class ManagerController extends Controller
             }
             $fournisseur->save();
 
+            // Mettre à jour l'utilisateur
+            if ($request->has('nom')) {
+                $user->nom = $request->nom;
+            }
+            if ($request->has('prenom')) {
+                $user->prenom = $request->prenom;
+            }
             if ($request->has('telephone')) {
                 $user->telephone = $request->telephone;
-                $user->save();
             }
+            if ($request->has('email')) {
+                $user->email = $request->email;
+            }
+            $user->save();
 
             DB::commit();
 
@@ -112,7 +128,7 @@ class ManagerController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Erreur lors de la modification'], 500);
+            return response()->json(['message' => 'Erreur lors de la modification: ' . $e->getMessage()], 500);
         }
     }
 
@@ -122,98 +138,155 @@ class ManagerController extends Controller
         return response()->json(['fournisseurs' => $fournisseurs]);
     }
 
-    public function desactiverFournisseur($id_fournisseur)
-    {
-        try {
-            $fournisseur = Fournisseur::findOrFail($id_fournisseur);
-            $user = $fournisseur->user;
-            $user->statut = false;
-            $user->save();
-
-            return response()->json(['message' => 'Fournisseur désactivé avec succès']);
-
-        } catch (\Exception $e) {
-            return response()->json(['message' => 'Erreur lors de la désactivation'], 500);
-        }
-    }
-
     public function activerFournisseur($id_fournisseur)
     {
         try {
-            $fournisseur = Fournisseur::findOrFail($id_fournisseur);
+            $fournisseur = Fournisseur::with('user')->find($id_fournisseur);
+            
+            if (!$fournisseur) {
+                return response()->json(['message' => 'Fournisseur non trouvé'], 404);
+            }
+            
             $user = $fournisseur->user;
+            
+            if (!$user) {
+                return response()->json(['message' => 'Utilisateur non trouvé pour ce fournisseur'], 404);
+            }
+            
             $user->statut = true;
             $user->save();
 
-            return response()->json(['message' => 'Fournisseur activé avec succès']);
+            return response()->json([
+                'message' => 'Fournisseur activé avec succès',
+                'statut' => true,
+                'fournisseur' => $fournisseur->fresh('user')
+            ]);
 
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Erreur lors de l\'activation'], 500);
+            return response()->json([
+                'message' => 'Erreur lors de l\'activation: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function desactiverFournisseur($id_fournisseur)
+    {
+        try {
+            $fournisseur = Fournisseur::with('user')->find($id_fournisseur);
+            
+            if (!$fournisseur) {
+                return response()->json(['message' => 'Fournisseur non trouvé'], 404);
+            }
+            
+            $user = $fournisseur->user;
+            
+            if (!$user) {
+                return response()->json(['message' => 'Utilisateur non trouvé pour ce fournisseur'], 404);
+            }
+            
+            $user->statut = false;
+            $user->save();
+            $user->tokens()->delete();
+
+            return response()->json([
+                'message' => 'Fournisseur désactivé avec succès',
+                'statut' => false
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Erreur lors de la désactivation: ' . $e->getMessage()
+            ], 500);
         }
     }
 
     // ==============================================
-    // 🔹 GESTION DES ICR
+    // 🔹 GESTION DES ICR - AMÉLIORÉE
     // ==============================================
-public function creerIcr(Request $request)
-{
-    $request->validate([
-        'nom' => 'required|string|max:100',
-        'prenom' => 'required|string|max:100',
-        'email' => 'required|email|unique:users,email',
-        'telephone' => 'required|string|max:20',
-        'password' => 'required|string|min:6',
-        'matricule' => 'required|string|max:50|unique:icr,matricule',
-        'zone' => 'nullable|string|max:100',
-        'nom_entreprise' => 'nullable|string|max:100'  // 
-    ]);
 
-    DB::beginTransaction();
-
-    try {
-        $user = User::create([
-            'nom' => $request->nom,
-            'prenom' => $request->prenom,
-            'email' => $request->email,
-            'password' => Hash::make($request->password),
-            'telephone' => $request->telephone,
-            'role' => 'icr'
-        ]);
-
-        $icr = Icr::create([
-            'id_utilisateur' => $user->id_utilisateur,
-            'matricule' => $request->matricule,
-            'zone' => $request->zone,
-            'nom_entreprise' => $request->nom_entreprise  // ← AJOUTER
-        ]);
-
-        DB::commit();
-
-        return response()->json([
-            'message' => 'ICR créé avec succès',
-            'icr' => $icr->load('user')
-        ], 201);
-
-    } catch (\Exception $e) {
-        DB::rollBack();
-        return response()->json(['message' => 'Erreur lors de la création'], 500);
-    }
-}
-    public function modifierIcr(Request $request, $id_icr)
+    public function creerIcr(Request $request)
     {
-        $icr = Icr::findOrFail($id_icr);
-        $user = $icr->user;
-
         $request->validate([
-            'nom' => 'sometimes|string|max:100',
-            'prenom' => 'sometimes|string|max:100',
-            'telephone' => 'nullable|string|max:20',
-            'zone' => 'nullable|string|max:100'
+            'nom' => 'required|string|max:100',
+            'prenom' => 'required|string|max:100',
+            'email' => 'required|email|unique:users,email',
+            'telephone' => 'required|string|max:20',
+            'password' => 'required|string|min:6',
+            'matricule' => 'required|string|max:50|unique:icr,matricule',
+            'zone' => 'nullable|string|max:100',
+            'nom_entreprise' => 'nullable|string|max:100'
         ]);
 
         DB::beginTransaction();
 
         try {
+            $user = User::create([
+                'nom' => $request->nom,
+                'prenom' => $request->prenom,
+                'email' => $request->email,
+                'password' => Hash::make($request->password),
+                'telephone' => $request->telephone,
+                'role' => 'icr',
+                'statut' => true
+            ]);
+
+            $icr = Icr::create([
+                'id_utilisateur' => $user->id_utilisateur,
+                'matricule' => $request->matricule,
+                'zone' => $request->zone,
+                'nom_entreprise' => $request->nom_entreprise
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'ICR créé avec succès',
+                'icr' => $icr->load('user')
+            ], 201);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json(['message' => 'Erreur lors de la création: ' . $e->getMessage()], 500);
+        }
+    }
+
+    // ✅ MODIFICATION ICR - AMÉLIORÉE
+    public function modifierIcr(Request $request, $id_icr)
+    {
+        try {
+            $icr = Icr::with('user')->find($id_icr);
+            
+            if (!$icr) {
+                return response()->json(['message' => 'ICR non trouvé'], 404);
+            }
+            
+            $user = $icr->user;
+
+            $request->validate([
+                'nom' => 'sometimes|string|max:100',
+                'prenom' => 'sometimes|string|max:100',
+                'telephone' => 'nullable|string|max:20',
+                'zone' => 'nullable|string|max:100',
+                'nom_entreprise' => 'nullable|string|max:100',
+                'matricule' => 'sometimes|string|max:50|unique:icr,matricule,' . $id_icr . ',id_icr',
+                'email' => 'sometimes|email|unique:users,email,' . $user->id_utilisateur . ',id_utilisateur'
+            ]);
+
+            DB::beginTransaction();
+
+            // Mettre à jour l'ICR
+            if ($request->has('zone')) {
+                $icr->zone = $request->zone;
+            }
+            if ($request->has('nom_entreprise')) {
+                $icr->nom_entreprise = $request->nom_entreprise;
+            }
+            if ($request->has('matricule')) {
+                $icr->matricule = $request->matricule;
+            }
+            $icr->save();
+
+            // Mettre à jour l'utilisateur
             if ($request->has('nom')) {
                 $user->nom = $request->nom;
             }
@@ -223,12 +296,10 @@ public function creerIcr(Request $request)
             if ($request->has('telephone')) {
                 $user->telephone = $request->telephone;
             }
-            $user->save();
-
-            if ($request->has('zone')) {
-                $icr->zone = $request->zone;
-                $icr->save();
+            if ($request->has('email')) {
+                $user->email = $request->email;
             }
+            $user->save();
 
             DB::commit();
 
@@ -239,7 +310,7 @@ public function creerIcr(Request $request)
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Erreur lors de la modification'], 500);
+            return response()->json(['message' => 'Erreur lors de la modification: ' . $e->getMessage()], 500);
         }
     }
 
@@ -252,35 +323,66 @@ public function creerIcr(Request $request)
     public function desactiverIcr($id_icr)
     {
         try {
-            $icr = Icr::findOrFail($id_icr);
+            $icr = Icr::with('user')->find($id_icr);
+            
+            if (!$icr) {
+                return response()->json(['message' => 'ICR non trouvé'], 404);
+            }
+            
             $user = $icr->user;
+            
+            if (!$user) {
+                return response()->json(['message' => 'Utilisateur non trouvé'], 404);
+            }
+            
             $user->statut = false;
             $user->save();
+            $user->tokens()->delete();
 
-            return response()->json(['message' => 'ICR désactivé avec succès']);
+            return response()->json([
+                'message' => 'ICR désactivé avec succès',
+                'statut' => false
+            ]);
 
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Erreur lors de la désactivation'], 500);
+            return response()->json([
+                'message' => 'Erreur lors de la désactivation: ' . $e->getMessage()
+            ], 500);
         }
     }
 
     public function activerIcr($id_icr)
     {
         try {
-            $icr = Icr::findOrFail($id_icr);
+            $icr = Icr::with('user')->find($id_icr);
+            
+            if (!$icr) {
+                return response()->json(['message' => 'ICR non trouvé'], 404);
+            }
+            
             $user = $icr->user;
+            
+            if (!$user) {
+                return response()->json(['message' => 'Utilisateur non trouvé'], 404);
+            }
+            
             $user->statut = true;
             $user->save();
 
-            return response()->json(['message' => 'ICR activé avec succès']);
+            return response()->json([
+                'message' => 'ICR activé avec succès',
+                'statut' => true
+            ]);
 
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Erreur lors de l\'activation'], 500);
+            return response()->json([
+                'message' => 'Erreur lors de l\'activation: ' . $e->getMessage()
+            ], 500);
         }
     }
 
     // ==============================================
-    // 🔹 GESTION DES RESPONSABLES DE DÉPÔT
+    // 🔹 GESTION DES RESPONSABLES DE DÉPÔT - AMÉLIORÉE
     // ==============================================
 
     public function creerResponsableDepot(Request $request)
@@ -302,7 +404,8 @@ public function creerIcr(Request $request)
                 'email' => $request->email,
                 'password' => Hash::make($request->password),
                 'telephone' => $request->telephone,
-                'role' => 'responsable_depot'
+                'role' => 'responsable_depot',
+                'statut' => true
             ]);
 
             $responsable = ResponsableDepot::create([
@@ -318,24 +421,32 @@ public function creerIcr(Request $request)
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Erreur lors de la création'], 500);
+            return response()->json(['message' => 'Erreur lors de la création: ' . $e->getMessage()], 500);
         }
     }
 
+    // ✅ MODIFICATION RESPONSABLE - AMÉLIORÉE
     public function modifierResponsableDepot(Request $request, $id_responsable)
     {
-        $responsable = ResponsableDepot::findOrFail($id_responsable);
-        $user = $responsable->user;
-
-        $request->validate([
-            'nom' => 'sometimes|string|max:100',
-            'prenom' => 'sometimes|string|max:100',
-            'telephone' => 'nullable|string|max:20'
-        ]);
-
-        DB::beginTransaction();
-
         try {
+            $responsable = ResponsableDepot::with('user')->find($id_responsable);
+            
+            if (!$responsable) {
+                return response()->json(['message' => 'Responsable non trouvé'], 404);
+            }
+            
+            $user = $responsable->user;
+
+            $request->validate([
+                'nom' => 'sometimes|string|max:100',
+                'prenom' => 'sometimes|string|max:100',
+                'telephone' => 'nullable|string|max:20',
+                'email' => 'sometimes|email|unique:users,email,' . $user->id_utilisateur . ',id_utilisateur'
+            ]);
+
+            DB::beginTransaction();
+
+            // Mettre à jour l'utilisateur
             if ($request->has('nom')) {
                 $user->nom = $request->nom;
             }
@@ -344,6 +455,9 @@ public function creerIcr(Request $request)
             }
             if ($request->has('telephone')) {
                 $user->telephone = $request->telephone;
+            }
+            if ($request->has('email')) {
+                $user->email = $request->email;
             }
             $user->save();
 
@@ -356,7 +470,7 @@ public function creerIcr(Request $request)
 
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json(['message' => 'Erreur lors de la modification'], 500);
+            return response()->json(['message' => 'Erreur lors de la modification: ' . $e->getMessage()], 500);
         }
     }
 
@@ -369,31 +483,171 @@ public function creerIcr(Request $request)
     public function desactiverResponsableDepot($id_responsable)
     {
         try {
-            $responsable = ResponsableDepot::findOrFail($id_responsable);
+            $responsable = ResponsableDepot::with('user')->find($id_responsable);
+            
+            if (!$responsable) {
+                return response()->json(['message' => 'Responsable non trouvé'], 404);
+            }
+            
             $user = $responsable->user;
+            
+            if (!$user) {
+                return response()->json(['message' => 'Utilisateur non trouvé'], 404);
+            }
+            
             $user->statut = false;
             $user->save();
+            $user->tokens()->delete();
 
-            return response()->json(['message' => 'Responsable de dépôt désactivé avec succès']);
+            return response()->json([
+                'message' => 'Responsable de dépôt désactivé avec succès',
+                'statut' => false
+            ]);
 
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Erreur lors de la désactivation'], 500);
+            return response()->json([
+                'message' => 'Erreur lors de la désactivation: ' . $e->getMessage()
+            ], 500);
         }
     }
 
     public function activerResponsableDepot($id_responsable)
     {
         try {
-            $responsable = ResponsableDepot::findOrFail($id_responsable);
+            $responsable = ResponsableDepot::with('user')->find($id_responsable);
+            
+            if (!$responsable) {
+                return response()->json(['message' => 'Responsable non trouvé'], 404);
+            }
+            
             $user = $responsable->user;
+            
+            if (!$user) {
+                return response()->json(['message' => 'Utilisateur non trouvé'], 404);
+            }
+            
             $user->statut = true;
             $user->save();
 
-            return response()->json(['message' => 'Responsable de dépôt activé avec succès']);
+            return response()->json([
+                'message' => 'Responsable de dépôt activé avec succès',
+                'statut' => true
+            ]);
 
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Erreur lors de l\'activation'], 500);
+            return response()->json([
+                'message' => 'Erreur lors de l\'activation: ' . $e->getMessage()
+            ], 500);
         }
+    }
+
+    // ==============================================
+    // 🔹 GESTION DES DÉPÔTS - AMÉLIORÉE
+    // ==============================================
+
+    public function creerDepot(Request $request)
+    {
+        $request->validate([
+            'nom' => 'required|string|max:100|unique:depots,nom',
+            'localisation' => 'required|string|max:200',
+            'id_responsable' => 'required|exists:responsables_depot,id_responsable'
+        ]);
+
+        try {
+            $depot = Depot::create([
+                'nom' => $request->nom,
+                'localisation' => $request->localisation,
+                'id_responsable' => $request->id_responsable
+            ]);
+
+            return response()->json([
+                'message' => 'Dépôt créé avec succès',
+                'depot' => $depot->load('responsable.user')
+            ], 201);
+
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Erreur lors de la création: ' . $e->getMessage()], 500);
+        }
+    }
+
+    // ✅ MODIFICATION DÉPÔT - NOUVELLE
+    public function modifierDepot(Request $request, $id_depot)
+    {
+        try {
+            $depot = Depot::with('responsable.user')->find($id_depot);
+            
+            if (!$depot) {
+                return response()->json(['message' => 'Dépôt non trouvé'], 404);
+            }
+
+            $request->validate([
+                'nom' => 'sometimes|string|max:100|unique:depots,nom,' . $id_depot . ',id_depot',
+                'localisation' => 'sometimes|string|max:200',
+                'id_responsable' => 'sometimes|exists:responsables_depot,id_responsable'
+            ]);
+
+            if ($request->has('nom')) {
+                $depot->nom = $request->nom;
+            }
+            if ($request->has('localisation')) {
+                $depot->localisation = $request->localisation;
+            }
+            if ($request->has('id_responsable')) {
+                $depot->id_responsable = $request->id_responsable;
+            }
+            $depot->save();
+
+            return response()->json([
+                'message' => 'Dépôt modifié avec succès',
+                'depot' => $depot->fresh('responsable.user')
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Erreur lors de la modification: ' . $e->getMessage()], 500);
+        }
+    }
+
+    // ✅ SUPPRESSION DÉPÔT - NOUVELLE
+    public function supprimerDepot($id_depot)
+    {
+        try {
+            $depot = Depot::find($id_depot);
+            
+            if (!$depot) {
+                return response()->json(['message' => 'Dépôt non trouvé'], 404);
+            }
+
+            $depot->delete();
+
+            return response()->json([
+                'message' => 'Dépôt supprimé avec succès'
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Erreur lors de la suppression: ' . $e->getMessage()], 500);
+        }
+    }
+
+    public function listerDepots()
+    {
+        $depots = Depot::with('responsable.user')->get();
+        return response()->json(['depots' => $depots]);
+    }
+
+    public function changerResponsable(Request $request, $id_depot)
+    {
+        $request->validate([
+            'id_responsable' => 'required|exists:responsables_depot,id_responsable'
+        ]);
+
+        $depot = Depot::findOrFail($id_depot);
+        $depot->id_responsable = $request->id_responsable;
+        $depot->save();
+
+        return response()->json([
+            'message' => 'Responsable changé avec succès',
+            'depot' => $depot->load('responsable.user')
+        ]);
     }
 
     // ==============================================
@@ -425,7 +679,7 @@ public function creerIcr(Request $request)
             ]);
 
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Erreur lors du chargement du tableau de bord'], 500);
+            return response()->json(['message' => 'Erreur lors du chargement du tableau de bord: ' . $e->getMessage()], 500);
         }
     }
 
@@ -440,7 +694,7 @@ public function creerIcr(Request $request)
             return response()->json(['stocks' => $depots]);
 
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Erreur lors de la récupération des stocks'], 500);
+            return response()->json(['message' => 'Erreur lors de la récupération des stocks: ' . $e->getMessage()], 500);
         }
     }
 
@@ -451,7 +705,7 @@ public function creerIcr(Request $request)
             return response()->json(['stocks' => $stations]);
 
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Erreur lors de la récupération des stocks'], 500);
+            return response()->json(['message' => 'Erreur lors de la récupération des stocks: ' . $e->getMessage()], 500);
         }
     }
 
@@ -470,7 +724,7 @@ public function creerIcr(Request $request)
             return response()->json(['livraisons' => $bons]);
 
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Erreur lors du suivi des livraisons'], 500);
+            return response()->json(['message' => 'Erreur lors du suivi des livraisons: ' . $e->getMessage()], 500);
         }
     }
 
@@ -488,7 +742,7 @@ public function creerIcr(Request $request)
             return response()->json(['alertes' => $alertes]);
 
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Erreur lors de la récupération des alertes'], 500);
+            return response()->json(['message' => 'Erreur lors de la récupération des alertes: ' . $e->getMessage()], 500);
         }
     }
 
@@ -523,7 +777,7 @@ public function creerIcr(Request $request)
             return response()->json($stats);
 
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Erreur lors de la génération des statistiques'], 500);
+            return response()->json(['message' => 'Erreur lors de la génération des statistiques: ' . $e->getMessage()], 500);
         }
     }
 
@@ -555,7 +809,7 @@ public function creerIcr(Request $request)
             ]);
 
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Erreur lors de la fixation des prix'], 500);
+            return response()->json(['message' => 'Erreur lors de la fixation des prix: ' . $e->getMessage()], 500);
         }
     }
 
@@ -574,74 +828,69 @@ public function creerIcr(Request $request)
             ]);
 
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Erreur lors de la récupération des prix'], 500);
+            return response()->json(['message' => 'Erreur lors de la récupération des prix: ' . $e->getMessage()], 500);
         }
     }
 
-    public function historiquePrix()
+
+    // ✅ MÉTHODE DE DIAGNOSTIC
+    public function verifierFournisseur($id_fournisseur)
     {
         try {
-            $historique = User::where('role', 'manager')
-                ->whereNotNull('prix_essence')
-                ->orderBy('prix_updated_at', 'desc')
-                ->get(['prix_essence', 'prix_gasoil', 'prix_updated_at']);
-
-            return response()->json(['historique' => $historique]);
-
+            $fournisseur = Fournisseur::with('user')->find($id_fournisseur);
+            
+            if (!$fournisseur) {
+                return response()->json([
+                    'exists' => false,
+                    'message' => "Fournisseur ID $id_fournisseur n'existe pas"
+                ]);
+            }
+            
+            return response()->json([
+                'exists' => true,
+                'fournisseur' => $fournisseur,
+                'user' => $fournisseur->user,
+                'user_exists' => $fournisseur->user !== null,
+                'statut' => $fournisseur->user ? $fournisseur->user->statut : null
+            ]);
+            
         } catch (\Exception $e) {
-            return response()->json(['message' => 'Erreur lors de la récupération de l\'historique'], 500);
+            return response()->json(['error' => $e->getMessage()], 500);
         }
     }
 
-
- public function creerDepot(Request $request)
+public function historiquePrix()
 {
-    $request->validate([
-        'nom' => 'required|string|max:100|unique:depots,nom',
-        'localisation' => 'required|string|max:200'
-    ]);
-
     try {
-        // Récupérer l'ID du responsable par défaut (ou en créer un)
-        $defaultResponsable = ResponsableDepot::first();
-        
-        if (!$defaultResponsable) {
-            return response()->json(['message' => 'Aucun responsable disponible. Veuillez en créer un d\'abord.'], 400);
-        }
+        $historique = User::where('role', 'manager')
+            ->whereNotNull('prix_essence')
+            ->orderBy('prix_updated_at', 'asc') // ← Ascendant pour le graphique
+            ->get(['prix_essence', 'prix_gasoil', 'prix_updated_at', 'created_at']);
 
-        $depot = Depot::create([
-            'nom' => $request->nom,
-            'localisation' => $request->localisation,
-            'id_responsable' => $defaultResponsable->id_responsable
-        ]);
+        // Formater les données pour le graphique
+        $formatted = $historique->map(function ($item) {
+            return [
+                'essence' => (float) $item->prix_essence,
+                'gasoil' => (float) $item->prix_gasoil,
+                'date' => $item->prix_updated_at 
+                    ? Carbon::parse($item->prix_updated_at)->format('d/m/Y H:i') 
+                    : Carbon::parse($item->created_at)->format('d/m/Y H:i'),
+                'timestamp' => $item->prix_updated_at 
+                    ? Carbon::parse($item->prix_updated_at)->timestamp 
+                    : Carbon::parse($item->created_at)->timestamp
+            ];
+        });
 
         return response()->json([
-            'message' => 'Dépôt créé avec succès',
-            'depot' => $depot
-        ], 201);
+            'historique' => $formatted,
+            'dernier' => $formatted->last(),
+            'total' => $formatted->count()
+        ]);
 
     } catch (\Exception $e) {
-        return response()->json(['message' => 'Erreur lors de la création: ' . $e->getMessage()], 500);
+        return response()->json([
+            'message' => 'Erreur lors de la récupération de l\'historique: ' . $e->getMessage()
+        ], 500);
     }
 }
-
-public function listerDepots()
-{
-    $depots = Depot::with('responsable.user')->get();
-    return response()->json(['depots' => $depots]);
-}
-
-public function changerResponsable(Request $request, $id_depot)
-{
-    $request->validate([
-        'id_responsable' => 'required|exists:responsables_depot,id_responsable'
-    ]);
-
-    $depot = Depot::findOrFail($id_depot);
-    $depot->id_responsable = $request->id_responsable;
-    $depot->save();
-
-    return response()->json(['message' => 'Responsable changé avec succès']);
-}
-
 }

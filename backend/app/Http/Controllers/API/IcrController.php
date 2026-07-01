@@ -14,6 +14,7 @@ use App\Models\Certificat;
 use App\Models\Livraison;
 use App\Models\Station;
 use App\Models\Notification;
+use App\Models\Alerte;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
@@ -370,6 +371,62 @@ class IcrController extends Controller
         return response()->json(['message' => 'Camion créé avec succès', 'camion' => $camion], 201);
     }
 
+    public function modifierCamion(Request $request, $id_camion)
+    {
+        try {
+            $camion = Camion::with('chauffeur.user')->find($id_camion);
+            
+            if (!$camion) {
+                return response()->json([
+                    'message' => 'Camion non trouvé'
+                ], 404);
+            }
+
+            $request->validate([
+                'immatriculation' => 'sometimes|string|max:20|unique:camions,immatriculation,' . $id_camion . ',id_camion',
+                'capacite' => 'sometimes|numeric|min:0',
+                'type_carburant' => 'sometimes|in:essence,gasoil',
+                'statut' => 'sometimes|in:disponible,en_mission,en_panne,hors_service',
+                'id_chauffeur' => 'nullable|exists:chauffeurs,id_chauffeur'
+            ]);
+
+            if ($request->has('immatriculation')) {
+                $camion->immatriculation = $request->immatriculation;
+            }
+            if ($request->has('capacite')) {
+                $camion->capacite = $request->capacite;
+            }
+            if ($request->has('type_carburant')) {
+                $camion->type_carburant = $request->type_carburant;
+            }
+            if ($request->has('statut')) {
+                $camion->statut = $request->statut;
+            }
+            if ($request->has('id_chauffeur')) {
+                $chauffeur = Chauffeur::find($request->id_chauffeur);
+                if (!$chauffeur) {
+                    return response()->json([
+                        'message' => 'Chauffeur non trouvé'
+                    ], 404);
+                }
+                $camion->id_chauffeur = $request->id_chauffeur;
+            }
+            
+            $camion->save();
+
+            return response()->json([
+                'message' => 'Camion modifié avec succès',
+                'camion' => $camion->fresh('chauffeur.user')
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Erreur modification camion: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Erreur lors de la modification: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
     public function desactiverCamion($id_camion)
     {
         $camion = Camion::findOrFail($id_camion);
@@ -450,7 +507,6 @@ class IcrController extends Controller
             'livraisons.*.code_validation' => 'required|string|size:4'
         ]);
 
-        // Vérifier si une mission existe déjà pour ce bon
         $missionExistante = Mission::where('id_bon', $request->id_bon)->first();
         
         if ($missionExistante) {
@@ -487,18 +543,17 @@ class IcrController extends Controller
                     'id_gerant' => $station ? $station->id_gerant : null
                 ]);
                 
-                // ENVOYER UNE NOTIFICATION AU GÉRANT DE LA STATION - CORRIGÉ AVEC date_envoi
                 if ($station && $station->id_gerant) {
-                    $gerant = \App\Models\Gerant::find($station->id_gerant);
+                    $gerant = Gerant::find($station->id_gerant);
                     if ($gerant && $gerant->user) {
-                        \App\Models\Notification::create([
+                        Notification::create([
                             'type' => 'livraison',
                             'titre' => '📦 Nouvelle livraison en attente',
                             'message' => "Une livraison de {$livraison['quantite_prevue']}L est prévue pour votre station {$station->nom}. Code: {$livraison['code_validation']}",
                             'id_destinataire' => $gerant->user->id_utilisateur,
                             'lu' => false,
                             'lien' => '/gerant/livraisons',
-                            'date_envoi' => now(),  // ← LIGNE AJOUTÉE
+                            'date_envoi' => now(),
                             'created_at' => now(),
                             'updated_at' => now()
                         ]);
@@ -832,45 +887,189 @@ class IcrController extends Controller
             'mission' => $mission
         ]);
     }
-public function terminerMission($id_mission)
-{
-    $mission = Mission::findOrFail($id_mission);
-    
-    if ($mission->statut !== 'en_cours') {
-        return response()->json(['message' => 'Mission non terminable'], 400);
-    }
 
-    $mission->statut = 'terminee';
-    $mission->date_arrivee_reelle = now();
-    $mission->save();
+    public function terminerMission($id_mission)
+    {
+        $mission = Mission::findOrFail($id_mission);
+        
+        if ($mission->statut !== 'en_cours') {
+            return response()->json(['message' => 'Mission non terminable'], 400);
+        }
 
-    // Mettre à jour le statut du bon
-    $mission->bon->statut = 'termine';
-    $mission->bon->save();
+        $mission->statut = 'terminee';
+        $mission->date_arrivee_reelle = now();
+        $mission->save();
 
-    // ✅ LIBÉRER LE CAMION - Changer son statut à "disponible"
-    if ($mission->camion) {
-        $camion = $mission->camion;
-        $camion->statut = 'disponible';
-        $camion->save();
-    }
+        $mission->bon->statut = 'termine';
+        $mission->bon->save();
 
-    // ✅ NOTIFIER LE CHAUFFEUR QUE LA MISSION EST TERMINÉE
-    if ($mission->chauffeur && $mission->chauffeur->user) {
-        Notification::create([
-            'titre' => '✅ Mission terminée',
-            'message' => "La mission #{$mission->id_mission} est terminée. Vous êtes maintenant disponible pour de nouvelles missions.",
-            'id_destinataire' => $mission->chauffeur->user->id_utilisateur,
-            'lu' => false,
-            'date_envoi' => now(),
-            'created_at' => now(),
-            'updated_at' => now()
+        if ($mission->camion) {
+            $camion = $mission->camion;
+            $camion->statut = 'disponible';
+            $camion->save();
+        }
+
+        if ($mission->chauffeur && $mission->chauffeur->user) {
+            Notification::create([
+                'titre' => '✅ Mission terminée',
+                'message' => "La mission #{$mission->id_mission} est terminée. Vous êtes maintenant disponible pour de nouvelles missions.",
+                'id_destinataire' => $mission->chauffeur->user->id_utilisateur,
+                'lu' => false,
+                'date_envoi' => now(),
+                'created_at' => now(),
+                'updated_at' => now()
+            ]);
+        }
+
+        return response()->json([
+            'message' => 'Mission terminée. Le chauffeur et le camion sont maintenant disponibles pour d\'autres missions.',
+            'mission' => $mission
         ]);
     }
 
-    return response()->json([
-        'message' => 'Mission terminée. Le chauffeur et le camion sont maintenant disponibles pour d\'autres missions.',
-        'mission' => $mission
-    ]);
-}
+    // ==============================================
+    // 🔹 GESTION DES INCIDENTS (DEPUIS LA TABLE ALERTES)
+    // ==============================================
+
+    /**
+     * Voir les incidents signalés par les chauffeurs (depuis la table alertes)
+     */
+    public function voirIncidents()
+    {
+        try {
+            $user = auth()->user();
+            $icr = Icr::where('id_utilisateur', $user->id_utilisateur)->first();
+            
+            if (!$icr) {
+                return response()->json(['message' => 'ICR non trouvé'], 404);
+            }
+            
+            // Récupérer les IDs des chauffeurs de l'ICR
+            $chauffeurIds = Chauffeur::where('id_icr', $icr->id_icr)->pluck('id_chauffeur');
+            
+            // Récupérer les alertes de type 'incident_chauffeur'
+            $incidents = Alerte::where('type', 'incident_chauffeur')
+                ->whereIn('id_chauffeur', $chauffeurIds)
+                ->with(['chauffeur.user', 'mission'])
+                ->orderBy('created_at', 'desc')
+                ->get();
+            
+            // Formater les incidents pour le frontend
+            $formattedIncidents = $incidents->map(function($alerte) {
+                return [
+                    'id_incident' => $alerte->id_alerte,
+                    'type' => $alerte->message ?? 'Incident signalé',
+                    'message' => $alerte->message ?? 'Aucun détail',
+                    'statut' => $alerte->statut === 'non_lue' ? 'en_attente' : 'resolu',
+                    'date_incident' => $alerte->date_creation,
+                    'created_at' => $alerte->created_at,
+                    'chauffeur' => $alerte->chauffeur ? [
+                        'id_chauffeur' => $alerte->chauffeur->id_chauffeur,
+                        'user' => $alerte->chauffeur->user
+                    ] : null,
+                    'mission' => $alerte->mission ? [
+                        'id_mission' => $alerte->mission->id_mission,
+                        'bon' => $alerte->mission->bon,
+                        'camion' => $alerte->mission->camion
+                    ] : null
+                ];
+            });
+            
+            return response()->json([
+                'incidents' => $formattedIncidents,
+                'total' => $formattedIncidents->count(),
+                'non_resolus' => $formattedIncidents->filter(function($i) {
+                    return ($i['statut'] ?? 'en_attente') === 'en_attente';
+                })->count()
+            ]);
+            
+        } catch (\Exception $e) {
+            \Log::error('Erreur voirIncidents: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Erreur: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Voir les détails d'un incident
+     */
+    public function detailIncident($id_incident)
+    {
+        try {
+            $alerte = Alerte::with(['chauffeur.user', 'mission.bon', 'mission.camion'])
+                ->where('type', 'incident_chauffeur')
+                ->findOrFail($id_incident);
+            
+            return response()->json([
+                'id_incident' => $alerte->id_alerte,
+                'type' => $alerte->message ?? 'Incident signalé',
+                'message' => $alerte->message ?? 'Aucun détail',
+                'statut' => $alerte->statut === 'non_lue' ? 'en_attente' : 'resolu',
+                'date_incident' => $alerte->date_creation,
+                'created_at' => $alerte->created_at,
+                'chauffeur' => $alerte->chauffeur ? [
+                    'id_chauffeur' => $alerte->chauffeur->id_chauffeur,
+                    'user' => $alerte->chauffeur->user
+                ] : null,
+                'mission' => $alerte->mission ? [
+                    'id_mission' => $alerte->mission->id_mission,
+                    'bon' => $alerte->mission->bon,
+                    'camion' => $alerte->mission->camion
+                ] : null
+            ]);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Erreur: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Mettre à jour le statut d'un incident
+     */
+    public function updateIncidentStatus(Request $request, $id_incident)
+    {
+        try {
+            $request->validate([
+                'statut' => 'required|in:en_attente,en_cours,resolu,ignore'
+            ]);
+            
+            $alerte = Alerte::where('type', 'incident_chauffeur')
+                ->findOrFail($id_incident);
+            
+            // Convertir le statut pour la table alertes
+            // en_attente/en_cours/ignore → non_lue, resolu → lue
+            $statutAlerte = $request->statut === 'resolu' ? 'lue' : 'non_lue';
+            $alerte->statut = $statutAlerte;
+            $alerte->save();
+            
+            // Notifier le chauffeur
+            if ($alerte->chauffeur && $alerte->chauffeur->user) {
+                Notification::create([
+                    'titre' => '📋 Mise à jour de votre signalement',
+                    'message' => "L'incident #{$alerte->id_alerte} a été mis à jour : " . $request->statut,
+                    'id_destinataire' => $alerte->chauffeur->user->id_utilisateur,
+                    'lu' => false,
+                    'date_envoi' => now(),
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ]);
+            }
+            
+            return response()->json([
+                'message' => 'Incident mis à jour avec succès',
+                'incident' => [
+                    'id_incident' => $alerte->id_alerte,
+                    'statut' => $request->statut
+                ]
+            ]);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Erreur: ' . $e->getMessage()
+            ], 500);
+        }
+    }
 }
